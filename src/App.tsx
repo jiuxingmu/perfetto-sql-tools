@@ -51,7 +51,11 @@ function App() {
         }));
         message.success(`已导入 trace: ${file.name}`);
       } catch (err) {
-        message.error(`导入失败: ${String(err)}`);
+        const text = err instanceof Error ? err.message : String(err);
+        const hint = text.includes('Failed to fetch') || text.includes('ECONNREFUSED')
+          ? '后端服务未启动，请先执行 npm run server'
+          : text;
+        message.error(`导入失败: ${hint}`);
       } finally {
         setLoading(false);
       }
@@ -69,7 +73,11 @@ function App() {
       const r = await runPluginQuery(activePlugin, params);
       setResult(r);
     } catch (err) {
-      message.error(`查询失败: ${String(err)}`);
+      const text = err instanceof Error ? err.message : String(err);
+      const hint = text.includes('Failed to fetch') || text.includes('ECONNREFUSED')
+        ? '后端服务未启动，请先执行 npm run server'
+        : text;
+      message.error(`查询失败: ${hint}`);
     } finally {
       setRunning(false);
     }
@@ -128,8 +136,30 @@ function App() {
               <Row gutter={12}>
                 <Col span={4}><Input type="number" addonBefore="开始(s)" value={params.startSec} onChange={(e) => setParams((p) => ({ ...p, startSec: Number(e.target.value) }))} /></Col>
                 <Col span={4}><Input type="number" addonBefore="结束(s)" value={params.endSec} onChange={(e) => setParams((p) => ({ ...p, endSec: Number(e.target.value) }))} /></Col>
-                <Col span={5}><Select allowClear placeholder="进程" style={{ width: '100%' }} options={processOptions} value={params.process || undefined} onChange={(v) => setParams((p) => ({ ...p, process: v ?? '' }))} /></Col>
-                <Col span={5}><Select allowClear placeholder="线程" style={{ width: '100%' }} options={threadOptions} value={params.thread || undefined} onChange={(v) => setParams((p) => ({ ...p, thread: v ?? '' }))} /></Col>
+                <Col span={5}>
+                  <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="进程"
+                    style={{ width: '100%' }}
+                    options={processOptions}
+                    value={params.process || undefined}
+                    onChange={(v) => setParams((p) => ({ ...p, process: v ?? '' }))}
+                  />
+                </Col>
+                <Col span={5}>
+                  <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="线程"
+                    style={{ width: '100%' }}
+                    options={threadOptions}
+                    value={params.thread || undefined}
+                    onChange={(v) => setParams((p) => ({ ...p, thread: v ?? '' }))}
+                  />
+                </Col>
                 <Col span={4}><Input placeholder="事件关键字" value={params.keyword} onChange={(e) => setParams((p) => ({ ...p, keyword: e.target.value }))} /></Col>
                 <Col span={2}><Button type="primary" block loading={running} onClick={onRun}>运行</Button></Col>
               </Row>

@@ -56,21 +56,23 @@ perfetto-sql/
 npm install
 ```
 
-### 2) Start backend API
+### 2) Start frontend + backend (recommended)
+
+```bash
+npm run dev:all
+```
+
+该命令会同时启动：
+
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:3001`
+
+### 3) Start separately (optional)
 
 ```bash
 npm run server
-```
-
-默认监听 `http://localhost:3001`。
-
-### 3) Start frontend
-
-```bash
 npm run dev
 ```
-
-默认访问 `http://localhost:5173`。
 
 ### 4) Build
 
