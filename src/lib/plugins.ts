@@ -23,7 +23,7 @@ LIMIT 5000;`,
   {
     id: 'thread-trend',
     name: '线程数量变化趋势',
-    description: '按线程生命周期统计某进程线程数量变化',
+    description: '按时刻点统计某进程线程数量变化',
     outputType: 'line',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -46,7 +46,7 @@ threads_filtered AS (
   FROM thread t
   LEFT JOIN process p ON t.upid = p.upid
   WHERE t.utid IS NOT NULL
-    AND COALESCE(p.name, '') LIKE '%{{process}}%'
+    AND ('{{process}}' = '' OR COALESCE(p.name, '') = '{{process}}')
     AND COALESCE(t.name, '') LIKE '%{{thread}}%'
 ),
 bucketed AS (
@@ -56,7 +56,7 @@ bucketed AS (
     COUNT(DISTINCT tf.utid) AS thread_count
   FROM buckets b
   LEFT JOIN threads_filtered tf
-    ON COALESCE(tf.start_ts, -9223372036854775808) <= b.bucket_end_ns
+    ON COALESCE(tf.start_ts, -9223372036854775808) <= b.bucket_start_ns
    AND COALESCE(tf.end_ts, 9223372036854775807) >= b.bucket_start_ns
   GROUP BY b.bucket_idx, b.bucket_start_ns
 )

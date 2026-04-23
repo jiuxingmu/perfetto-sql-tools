@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Card, Col, Empty, Input, Layout, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, Upload, Button, message } from 'antd';
+import { Card, Col, Empty, Input, Layout, Modal, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, Upload, Button, message } from 'antd';
 import type { UploadProps } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { PLUGINS, runPluginQuery } from './lib/plugins';
@@ -114,6 +114,11 @@ function App() {
   );
   const [resultByPlugin, setResultByPlugin] = useState<Partial<Record<PluginDefinition['id'], QueryResult>>>({});
   const [running, setRunning] = useState(false);
+  const [trendCompareRange, setTrendCompareRange] = useState<{ t1?: number; t2?: number }>({});
+  const [trendDiffRunning, setTrendDiffRunning] = useState(false);
+  const [trendDiffRows, setTrendDiffRows] = useState<Record<string, unknown>[]>([]);
+  const [trendDiffCompared, setTrendDiffCompared] = useState(false);
+  const [trendDiffModalOpen, setTrendDiffModalOpen] = useState(false);
   const traceStartSec = dataset?.summary.timeRange[0] ?? 0;
   const traceEndSec = dataset?.summary.timeRange[1] ?? 0;
   const traceDurationSec = Math.max(0, traceEndSec - traceStartSec);
@@ -121,9 +126,9 @@ function App() {
   const activePlugin = useMemo(() => PLUGINS.find((p) => p.id === activePluginId)!, [activePluginId]);
   const stablePlugins = useMemo(() => PLUGINS.filter((p) => STABLE_PLUGIN_IDS.includes(p.id)), []);
   const devPlugins = useMemo(() => PLUGINS.filter((p) => !STABLE_PLUGIN_IDS.includes(p.id)), []);
+  const isThreadTrend = activePlugin.id === 'thread-trend';
   const activeParams = paramsByPlugin[activePluginId] ?? createDefaultParams(10);
   const activeResult = resultByPlugin[activePluginId] ?? null;
-  const showThreadFilter = activePlugin.id !== 'process-list';
 
   const [processListHover, setProcessListHover] = useState<{
     record: Record<string, unknown>;
@@ -157,11 +162,6 @@ function App() {
   const processOptions = useMemo(() => {
     if (!dataset) return [];
     return dataset.processes.map((p) => ({ label: p, value: p }));
-  }, [dataset]);
-
-  const threadOptions = useMemo(() => {
-    if (!dataset) return [];
-    return dataset.threads.map((t) => ({ label: t, value: t }));
   }, [dataset]);
 
   const uploadProps: UploadProps = {
@@ -232,6 +232,117 @@ function App() {
       setRunning(false);
     }
   };
+
+  const trendTimePointOptions = useMemo(() => {
+    if (activePlugin.id !== 'thread-trend' || !activeResult?.rows?.length) return [];
+    return activeResult.rows.map((r) => {
+      const absSec = Number(r.bucket_ts_sec ?? 0);
+      const relSec = roundRelativeSec(absSec - traceStartSec, 3);
+      const label = `${relSec.toFixed(3)}s`;
+      return { label, value: absSec };
+    });
+  }, [activePlugin.id, activeResult?.rows, traceStartSec]);
+
+  const onCompareThreadTrend = async () => {
+    const t1Abs = trendCompareRange.t1;
+    const t2Abs = trendCompareRange.t2;
+    if (activePlugin.id !== 'thread-trend') return;
+    if (t1Abs === undefined || t2Abs === undefined) {
+      message.warning('请先选择 t1 和 t2');
+      return;
+    }
+    const t1 = Math.min(t1Abs, t2Abs);
+    const t2 = Math.max(t1Abs, t2Abs);
+    const processFilter = globalProcess || activeParams.process || '';
+    const threadFilter = activeParams.thread || '';
+    const esc = (s: string) => s.replaceAll("'", "''");
+    const sql = `WITH params AS (
+  SELECT
+    CAST(${t1} * 1e9 AS INT) AS t1_ns,
+    CAST(${t2} * 1e9 AS INT) AS t2_ns
+),
+active_t1 AS (
+  SELECT
+    t.utid,
+    t.tid,
+    COALESCE(t.name, printf('tid_%d', t.tid)) AS thread,
+    COALESCE(p.name, printf('pid_%d', p.pid)) AS process
+  FROM thread t
+  LEFT JOIN process p ON t.upid = p.upid
+  JOIN params x
+  WHERE t.utid IS NOT NULL
+    AND ('${esc(processFilter)}' = '' OR COALESCE(p.name, '') = '${esc(processFilter)}')
+    AND COALESCE(t.name, '') LIKE '%${esc(threadFilter)}%'
+    AND COALESCE(t.start_ts, -9223372036854775808) <= x.t1_ns
+    AND COALESCE(t.end_ts, 9223372036854775807) >= x.t1_ns
+),
+active_t2 AS (
+  SELECT
+    t.utid,
+    t.tid,
+    COALESCE(t.name, printf('tid_%d', t.tid)) AS thread,
+    COALESCE(p.name, printf('pid_%d', p.pid)) AS process
+  FROM thread t
+  LEFT JOIN process p ON t.upid = p.upid
+  JOIN params x
+  WHERE t.utid IS NOT NULL
+    AND ('${esc(processFilter)}' = '' OR COALESCE(p.name, '') = '${esc(processFilter)}')
+    AND COALESCE(t.name, '') LIKE '%${esc(threadFilter)}%'
+    AND COALESCE(t.start_ts, -9223372036854775808) <= x.t2_ns
+    AND COALESCE(t.end_ts, 9223372036854775807) >= x.t2_ns
+)
+SELECT
+  'closed' AS change_type,
+  a1.utid,
+  a1.tid,
+  a1.thread,
+  a1.process
+FROM active_t1 a1
+LEFT JOIN active_t2 a2 ON a1.utid = a2.utid
+WHERE a2.utid IS NULL
+UNION ALL
+SELECT
+  'opened' AS change_type,
+  a2.utid,
+  a2.tid,
+  a2.thread,
+  a2.process
+FROM active_t2 a2
+LEFT JOIN active_t1 a1 ON a2.utid = a1.utid
+WHERE a1.utid IS NULL
+ORDER BY 1 ASC, 3 ASC;`;
+    setTrendDiffRunning(true);
+    setTrendDiffCompared(false);
+    try {
+      const resp = await fetch('/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql }),
+      });
+      if (!resp.ok) {
+        throw new Error(await resp.text());
+      }
+      const rows = (await resp.json()) as Record<string, unknown>[];
+      setTrendDiffRows(rows);
+      setTrendDiffCompared(true);
+      setTrendDiffModalOpen(true);
+      message.success(`线程变化对比完成，共 ${rows.length} 条`);
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      message.error(`对比失败: ${text}`);
+    } finally {
+      setTrendDiffRunning(false);
+    }
+  };
+
+  const trendOpenedRows = useMemo(
+    () => trendDiffRows.filter((r) => String(r.change_type) === 'opened'),
+    [trendDiffRows],
+  );
+  const trendClosedRows = useMemo(
+    () => trendDiffRows.filter((r) => String(r.change_type) === 'closed'),
+    [trendDiffRows],
+  );
 
   const { tableColumns, tableScrollX } = useMemo(() => {
     if (!activeResult?.rows?.length) return { tableColumns: [], tableScrollX: 0 };
@@ -326,6 +437,19 @@ function App() {
     if (!rows.length) return '[]';
     return JSON.stringify(mapRowsToRelativeTraceTimes(rows, traceStartSec), null, 2);
   }, [activeResult?.rows, traceStartSec]);
+
+  const listSummaryText = useMemo(() => {
+    if (activePlugin.id !== 'process-list' && activePlugin.id !== 'thread-detail') return null;
+    if (!activeResult) return null;
+    const p = globalProcess || activeParams.process || '全部进程';
+    const t = activePlugin.id === 'thread-detail' ? (activeParams.thread || '全部线程') : '';
+    const timeRange = `${activeParams.startSec.toFixed(3)}s ~ ${activeParams.endSec.toFixed(3)}s`;
+    const count = activeResult.rows.length;
+    if (activePlugin.id === 'thread-detail') {
+      return `筛选条件：时间=${timeRange}，进程=${p}，线程=${t}；共计 ${count} 条结果。`;
+    }
+    return `筛选条件：时间=${timeRange}，进程=${p}；共计 ${count} 条结果。`;
+  }, [activePlugin.id, activeResult, activeParams.endSec, activeParams.process, activeParams.startSec, activeParams.thread, globalProcess]);
 
   const processListHoverPortal =
     processListHover && (activePlugin.id === 'process-list' || activePlugin.id === 'thread-detail')
@@ -497,17 +621,17 @@ function App() {
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
             {dataset ? (
               <Row gutter={12}>
+                <Col span={6}><Statistic title="Trace 名称" value={dataset.summary.traceName} /></Col>
+                <Col span={6}><Statistic title="时间范围(相对s)" value={`0.00 - ${traceDurationSec.toFixed(2)}`} /></Col>
                 <Col span={4}><Statistic title="进程数" value={dataset.summary.processCount} /></Col>
                 <Col span={4}><Statistic title="线程数" value={dataset.summary.threadCount} /></Col>
                 <Col span={4}><Statistic title="记录数" value={dataset.summary.recordCount} /></Col>
-                <Col span={6}><Statistic title="时间范围(相对s)" value={`0.00 - ${traceDurationSec.toFixed(2)}`} /></Col>
-                <Col span={6}><Statistic title="Trace 名称" value={dataset.summary.traceName} /></Col>
               </Row>
             ) : <Empty description="请先导入 trace 文件" />}
 
             <Card title={`参数配置 - ${activePlugin.name}`}>
               <Row gutter={12}>
-                <Col span={4}>
+                <Col span={isThreadTrend ? 4 : 5}>
                   <Input
                     type="number"
                     addonBefore="开始(s)"
@@ -515,7 +639,7 @@ function App() {
                     onChange={(e) => setActiveParams((p) => ({ ...p, startSec: Number(e.target.value) }))}
                   />
                 </Col>
-                <Col span={4}>
+                <Col span={isThreadTrend ? 4 : 5}>
                   <Input
                     type="number"
                     addonBefore="结束(s)"
@@ -524,7 +648,7 @@ function App() {
                     max={traceDurationSec || undefined}
                   />
                 </Col>
-                <Col span={5}>
+                <Col span={isThreadTrend ? 6 : 8}>
                   <Select
                     allowClear
                     showSearch
@@ -536,41 +660,57 @@ function App() {
                     onChange={(v) => setActiveParams((p) => ({ ...p, process: v ?? '' }))}
                   />
                 </Col>
-                {showThreadFilter ? (
-                  <Col span={5}>
+                {isThreadTrend ? (
+                  <Col span={7}>
+                    <Input
+                      type="number"
+                      addonBefore="分桶(ms)"
+                      value={activeParams.bucketMs}
+                      onChange={(e) => setActiveParams((p) => ({ ...p, bucketMs: Number(e.target.value) }))}
+                    />
+                  </Col>
+                ) : null}
+                <Col span={isThreadTrend ? 3 : 6}><Button type="primary" block loading={running} onClick={onRun}>运行</Button></Col>
+              </Row>
+              {isThreadTrend && (
+                <Row style={{ marginTop: 12 }} gutter={12}>
+                  <Col span={8}>
                     <Select
-                      allowClear
+                      placeholder="选择 t1"
+                      style={{ width: '100%' }}
                       showSearch
                       optionFilterProp="label"
-                      placeholder="线程"
-                      style={{ width: '100%' }}
-                      options={threadOptions}
-                      value={activeParams.thread || undefined}
-                      onChange={(v) => setActiveParams((p) => ({ ...p, thread: v ?? '' }))}
+                      options={trendTimePointOptions}
+                      value={trendCompareRange.t1}
+                      onChange={(v) => setTrendCompareRange((prev) => ({ ...prev, t1: v }))}
                     />
                   </Col>
-                ) : null}
-                {activePlugin.id !== 'process-list' && activePlugin.id !== 'thread-detail' ? (
-                  <Col span={4}>
-                    <Input
-                      placeholder="事件关键字"
-                      value={activeParams.keyword}
-                      onChange={(e) => setActiveParams((p) => ({ ...p, keyword: e.target.value }))}
-                    />
-                  </Col>
-                ) : null}
-                <Col span={2}><Button type="primary" block loading={running} onClick={onRun}>运行</Button></Col>
-              </Row>
-              {activePlugin.id === 'thread-trend' && (
-                <Row style={{ marginTop: 12 }}>
                   <Col span={8}>
-                    <Input type="number" addonBefore="分桶(ms)" value={activeParams.bucketMs} onChange={(e) => setActiveParams((p) => ({ ...p, bucketMs: Number(e.target.value) }))} />
+                    <Select
+                      placeholder="选择 t2"
+                      style={{ width: '100%' }}
+                      showSearch
+                      optionFilterProp="label"
+                      options={trendTimePointOptions}
+                      value={trendCompareRange.t2}
+                      onChange={(v) => setTrendCompareRange((prev) => ({ ...prev, t2: v }))}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Button block loading={trendDiffRunning} onClick={onCompareThreadTrend}>
+                      对比线程变化
+                    </Button>
                   </Col>
                 </Row>
               )}
             </Card>
 
             <Card title="结果">
+              {listSummaryText ? (
+                <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                  {listSummaryText}
+                </Typography.Text>
+              ) : null}
               <Tabs items={[
                 {
                   key: 'viz',
@@ -607,10 +747,65 @@ function App() {
                   {activeResult.stats.map((s) => <Col key={s.label} span={6}><Card size="small"><Statistic title={s.label} value={s.value} /></Card></Col>)}
                 </Row>
               ) : null}
+              {activePlugin.id === 'thread-trend' && trendDiffCompared ? (
+                <Card size="small" style={{ marginTop: 12 }}>
+                  <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                    <Typography.Text type="secondary">
+                      t1→t2 已完成对比：新开 {trendOpenedRows.length}，关闭 {trendClosedRows.length}
+                    </Typography.Text>
+                    <Button onClick={() => setTrendDiffModalOpen(true)}>查看线程变化详情</Button>
+                  </Space>
+                </Card>
+              ) : null}
             </Card>
           </Space>
         </Content>
       </Layout>
+      <Modal
+        title={`t1→t2 线程变化详情（新开 ${trendOpenedRows.length}，关闭 ${trendClosedRows.length}）`}
+        open={trendDiffModalOpen}
+        onCancel={() => setTrendDiffModalOpen(false)}
+        footer={null}
+        width={1100}
+        destroyOnClose
+      >
+        <Row gutter={12}>
+          <Col span={12}>
+            <Card size="small" title={`新开线程 (${trendOpenedRows.length})`} style={{ borderColor: '#d1fae5' }}>
+              <Table<Record<string, unknown>>
+                rowKey={(r, i) => `opened-${String(r.utid)}-${i ?? 0}`}
+                size="small"
+                pagination={{ pageSize: 20 }}
+                locale={{ emptyText: '无新开线程' }}
+                columns={[
+                  { title: 'utid', dataIndex: 'utid', key: 'utid', width: 100 },
+                  { title: 'tid', dataIndex: 'tid', key: 'tid', width: 100 },
+                  { title: 'thread', dataIndex: 'thread', key: 'thread' },
+                  { title: 'process', dataIndex: 'process', key: 'process' },
+                ]}
+                dataSource={trendOpenedRows}
+              />
+            </Card>
+          </Col>
+          <Col span={12}>
+            <Card size="small" title={`关闭线程 (${trendClosedRows.length})`} style={{ borderColor: '#fee2e2' }}>
+              <Table<Record<string, unknown>>
+                rowKey={(r, i) => `closed-${String(r.utid)}-${i ?? 0}`}
+                size="small"
+                pagination={{ pageSize: 20 }}
+                locale={{ emptyText: '无关闭线程' }}
+                columns={[
+                  { title: 'utid', dataIndex: 'utid', key: 'utid', width: 100 },
+                  { title: 'tid', dataIndex: 'tid', key: 'tid', width: 100 },
+                  { title: 'thread', dataIndex: 'thread', key: 'thread' },
+                  { title: 'process', dataIndex: 'process', key: 'process' },
+                ]}
+                dataSource={trendClosedRows}
+              />
+            </Card>
+          </Col>
+        </Row>
+      </Modal>
       <Footer style={{ textAlign: 'center', color: '#64748b', fontSize: 12, padding: '10px 24px' }}>
         Copyright © {new Date().getFullYear()} rengao
       </Footer>
