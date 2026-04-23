@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { UploadProps } from 'antd';
 import { message } from 'antd';
-import { PLUGINS } from '../lib/plugins';
 import type { PluginDefinition, QueryParams, QueryResult, TraceDataset } from '../types';
 
 type UseTraceImportArgs = {
-  createDefaultParams: (defaultEndSec: number) => QueryParams;
+  createParamsByPlugin: (defaultEndSec: number) => Record<PluginDefinition['id'], QueryParams>;
   setDataset: (dataset: TraceDataset) => void;
   setGlobalProcess: (value: string) => void;
   setResultByPlugin: (value: Partial<Record<PluginDefinition['id'], QueryResult>>) => void;
@@ -13,7 +12,7 @@ type UseTraceImportArgs = {
 };
 
 export function useTraceImport({
-  createDefaultParams,
+  createParamsByPlugin,
   setDataset,
   setGlobalProcess,
   setResultByPlugin,
@@ -38,11 +37,7 @@ export function useTraceImport({
         setGlobalProcess('');
         const relativeEndSec = Number((parsed.summary.timeRange[1] - parsed.summary.timeRange[0]).toFixed(3));
         setResultByPlugin({});
-        setParamsByPlugin(
-          Object.fromEntries(
-            PLUGINS.map((p) => [p.id, createDefaultParams(relativeEndSec)]),
-          ) as Record<PluginDefinition['id'], QueryParams>,
-        );
+        setParamsByPlugin(createParamsByPlugin(relativeEndSec));
         message.success(`已导入 trace: ${file.name}`);
       } catch (err) {
         const text = err instanceof Error ? err.message : String(err);
@@ -55,7 +50,7 @@ export function useTraceImport({
       }
       return false;
     },
-  }), [createDefaultParams, setDataset, setGlobalProcess, setParamsByPlugin, setResultByPlugin]);
+  }), [createParamsByPlugin, setDataset, setGlobalProcess, setParamsByPlugin, setResultByPlugin]);
 
   return { loading, uploadProps };
 }

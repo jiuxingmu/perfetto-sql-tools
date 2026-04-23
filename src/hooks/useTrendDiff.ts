@@ -25,14 +25,16 @@ export function useTrendDiff({
   const [trendDiffCompared, setTrendDiffCompared] = useState(false);
   const [trendDiffModalOpen, setTrendDiffModalOpen] = useState(false);
 
+  const trendRows = activeResult?.rows;
+
   const trendTimePointOptions = useMemo(() => {
-    if (activePlugin.id !== 'thread-trend' || !activeResult?.rows?.length) return [];
-    return activeResult.rows.map((r) => {
+    if (activePlugin.id !== 'thread-trend' || !trendRows?.length) return [];
+    return trendRows.map((r) => {
       const absSec = Number(r.bucket_ts_sec ?? 0);
       const relSec = roundRelativeSec(absSec - traceStartSec, 3);
       return { label: `${relSec.toFixed(3)}s`, value: absSec };
     });
-  }, [activePlugin.id, activeResult?.rows, traceStartSec]);
+  }, [activePlugin.id, traceStartSec, trendRows]);
 
   const onCompareThreadTrend = async () => {
     const t1Abs = trendCompareRange.t1;

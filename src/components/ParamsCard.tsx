@@ -1,6 +1,5 @@
 import { Button, Card, Col, Row, Select } from 'antd';
 import type { ReactNode } from 'react';
-import type { PluginDefinition } from '../types';
 
 type ParamFieldConfig = {
   key: string;
