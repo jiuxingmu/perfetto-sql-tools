@@ -23,24 +23,44 @@ LIMIT 5000;`,
   {
     id: 'thread-trend',
     name: '线程数量变化趋势',
-    description: '按时间分桶统计线程活跃数量变化',
+    description: '按线程生命周期统计某进程线程数量变化',
     outputType: 'line',
-    sqlTemplate: `WITH filtered AS (
-  SELECT s.ts, t.utid
-  FROM slice s
-  JOIN thread_track tt ON s.track_id = tt.id
-  JOIN thread t ON tt.utid = t.utid
+    sqlTemplate: `WITH params AS (
+  SELECT
+    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
+    CAST({{endSec}} * 1e9 AS INT) AS end_ns,
+    CAST({{bucketMs}} * 1e6 AS INT) AS bucket_ns
+),
+buckets AS (
+  SELECT 0 AS bucket_idx, start_ns AS bucket_start_ns, start_ns + bucket_ns AS bucket_end_ns
+  FROM params
+  UNION ALL
+  SELECT b.bucket_idx + 1, b.bucket_end_ns, b.bucket_end_ns + p.bucket_ns
+  FROM buckets b
+  JOIN params p
+  WHERE b.bucket_end_ns < p.end_ns
+    AND b.bucket_idx < 5000
+),
+threads_filtered AS (
+  SELECT t.utid, t.start_ts, t.end_ts
+  FROM thread t
   LEFT JOIN process p ON t.upid = p.upid
-  WHERE s.ts BETWEEN {{startSec}} * 1e9 AND {{endSec}} * 1e9
+  WHERE t.utid IS NOT NULL
     AND COALESCE(p.name, '') LIKE '%{{process}}%'
+    AND COALESCE(t.name, '') LIKE '%{{thread}}%'
 ),
 bucketed AS (
-  SELECT CAST((ts - {{startSec}} * 1e9) / ({{bucketMs}} * 1e6) AS INT) AS bucket_idx,
-         COUNT(DISTINCT utid) AS thread_count
-  FROM filtered
-  GROUP BY bucket_idx
+  SELECT
+    b.bucket_idx,
+    b.bucket_start_ns,
+    COUNT(DISTINCT tf.utid) AS thread_count
+  FROM buckets b
+  LEFT JOIN threads_filtered tf
+    ON COALESCE(tf.start_ts, -9223372036854775808) <= b.bucket_end_ns
+   AND COALESCE(tf.end_ts, 9223372036854775807) >= b.bucket_start_ns
+  GROUP BY b.bucket_idx, b.bucket_start_ns
 )
-SELECT ({{startSec}} + bucket_idx * {{bucketMs}} / 1000.0) AS bucket_ts_sec, thread_count
+SELECT bucket_start_ns / 1e9 AS bucket_ts_sec, thread_count
 FROM bucketed
 ORDER BY bucket_idx;`,
   },
@@ -64,6 +84,39 @@ WHERE s.ts BETWEEN {{startSec}} * 1e9 AND {{endSec}} * 1e9
 GROUP BY s.name
 ORDER BY total_dur_ms DESC
 LIMIT 1000;`,
+  },
+  {
+    id: 'thread-state',
+    name: '线程状态明细',
+    description: '统计某个进程在时间范围内的线程状态分布',
+    outputType: 'table',
+    sqlTemplate: `WITH params AS (
+  SELECT
+    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
+    CAST({{endSec}} * 1e9 AS INT) AS end_ns
+)
+SELECT
+  COALESCE(p.name, printf('pid_%d', p.pid)) AS process,
+  COALESCE(t.name, printf('tid_%d', t.tid)) AS thread,
+  t.tid,
+  COALESCE(ts.state, 'unknown') AS state,
+  COUNT(1) AS state_samples,
+  ROUND(SUM(COALESCE(ts.dur, 0)) / 1e6, 3) AS state_dur_ms,
+  ROUND(MIN(ts.ts) / 1e9, 6) AS first_ts_sec,
+  ROUND(MAX(ts.ts + COALESCE(ts.dur, 0)) / 1e9, 6) AS last_ts_sec,
+  MAX(COALESCE(ts.io_wait, 0)) AS io_wait_flag
+FROM thread_state ts
+JOIN thread t ON ts.utid = t.utid
+LEFT JOIN process p ON t.upid = p.upid
+JOIN params x
+WHERE ts.ts <= x.end_ns
+  AND (ts.ts + COALESCE(ts.dur, 0)) >= x.start_ns
+  AND COALESCE(p.name, '') LIKE '%{{process}}%'
+  AND COALESCE(t.name, '') LIKE '%{{thread}}%'
+  AND COALESCE(ts.state, '') LIKE '%{{keyword}}%'
+GROUP BY process, thread, t.tid, state
+ORDER BY state_dur_ms DESC
+LIMIT 5000;`,
   },
 ];
 

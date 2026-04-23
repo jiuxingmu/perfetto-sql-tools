@@ -14,6 +14,9 @@ function App() {
   const [params, setParams] = useState<QueryParams>({ startSec: 0, endSec: 10, bucketMs: 1000, process: '', thread: '', keyword: '' });
   const [result, setResult] = useState<QueryResult | null>(null);
   const [running, setRunning] = useState(false);
+  const traceStartSec = dataset?.summary.timeRange[0] ?? 0;
+  const traceEndSec = dataset?.summary.timeRange[1] ?? 0;
+  const traceDurationSec = Math.max(0, traceEndSec - traceStartSec);
 
   const activePlugin = useMemo(() => PLUGINS.find((p) => p.id === activePluginId)!, [activePluginId]);
 
@@ -44,8 +47,8 @@ function App() {
         setResult(null);
         setParams((p) => ({
           ...p,
-          startSec: parsed.summary.timeRange[0],
-          endSec: Math.ceil(parsed.summary.timeRange[1]),
+          startSec: 0,
+          endSec: Number((parsed.summary.timeRange[1] - parsed.summary.timeRange[0]).toFixed(3)),
           process: '',
           thread: '',
         }));
@@ -70,7 +73,12 @@ function App() {
     }
     setRunning(true);
     try {
-      const r = await runPluginQuery(activePlugin, params);
+      const absParams: QueryParams = {
+        ...params,
+        startSec: params.startSec + traceStartSec,
+        endSec: params.endSec + traceStartSec,
+      };
+      const r = await runPluginQuery(activePlugin, absParams);
       setResult(r);
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);
@@ -127,15 +135,30 @@ function App() {
                 <Col span={4}><Statistic title="进程数" value={dataset.summary.processCount} /></Col>
                 <Col span={4}><Statistic title="线程数" value={dataset.summary.threadCount} /></Col>
                 <Col span={4}><Statistic title="记录数" value={dataset.summary.recordCount} /></Col>
-                <Col span={6}><Statistic title="时间范围(s)" value={`${dataset.summary.timeRange[0].toFixed(2)} - ${dataset.summary.timeRange[1].toFixed(2)}`} /></Col>
+                <Col span={6}><Statistic title="时间范围(相对s)" value={`0.00 - ${traceDurationSec.toFixed(2)}`} /></Col>
                 <Col span={6}><Statistic title="Trace 名称" value={dataset.summary.traceName} /></Col>
               </Row>
             ) : <Empty description="请先导入 trace 文件" />}
 
             <Card title={`参数配置 - ${activePlugin.name}`}>
               <Row gutter={12}>
-                <Col span={4}><Input type="number" addonBefore="开始(s)" value={params.startSec} onChange={(e) => setParams((p) => ({ ...p, startSec: Number(e.target.value) }))} /></Col>
-                <Col span={4}><Input type="number" addonBefore="结束(s)" value={params.endSec} onChange={(e) => setParams((p) => ({ ...p, endSec: Number(e.target.value) }))} /></Col>
+                <Col span={4}>
+                  <Input
+                    type="number"
+                    addonBefore="开始(s)"
+                    value={params.startSec}
+                    onChange={(e) => setParams((p) => ({ ...p, startSec: Number(e.target.value) }))}
+                  />
+                </Col>
+                <Col span={4}>
+                  <Input
+                    type="number"
+                    addonBefore="结束(s)"
+                    value={params.endSec}
+                    onChange={(e) => setParams((p) => ({ ...p, endSec: Number(e.target.value) }))}
+                    max={traceDurationSec || undefined}
+                  />
+                </Col>
                 <Col span={5}>
                   <Select
                     allowClear
