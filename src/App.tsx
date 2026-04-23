@@ -1,11 +1,70 @@
-import { useMemo, useState } from 'react';
-import { Card, Col, Empty, Input, Layout, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, Upload, Button, message } from 'antd';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Card, Col, Descriptions, Empty, Input, Layout, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, Upload, Button, message } from 'antd';
 import type { UploadProps } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { PLUGINS, runPluginQuery } from './lib/plugins';
+import {
+  isAbsoluteTraceTimeColumn,
+  mapRowsToRelativeTraceTimes,
+  relativeTraceSecFractionDigits,
+  roundRelativeSec,
+  toRelativeTraceSecDisplay,
+} from './lib/traceRelativeTime';
 import type { PluginDefinition, QueryParams, QueryResult, TraceDataset } from './types';
 
 const { Header, Sider, Content } = Layout;
+
+/** 结果表列宽：总和用于 `scroll.x`，避免列多时被压到只看见前几列。 */
+function getResultColumnWidth(key: string): number {
+  if (key === 'cmdline') return 360;
+  if (key === 'name' || key === 'process') return 180;
+  if (key === 'status') return 96;
+  if (key === 'active_in_window_sec') return 140;
+  if (isAbsoluteTraceTimeColumn(key)) return 132;
+  if (key === 'parent_upid' || key === 'arg_set_id' || key === 'android_appid' || key === 'uid') return 112;
+  if (key === 'upid' || key === 'pid') return 88;
+  return 108;
+}
+
+/** 进程列表：主表仅展示这些列，其余在悬停浮层中展示。 */
+const PROCESS_LIST_TABLE_KEYS = ['pid', 'name', 'process', 'uid', 'status', 'window_start_sec', 'window_end_sec'] as const;
+
+const PROCESS_LIST_EXTRA_KEY_ORDER = [
+  'upid',
+  'cmdline',
+  'parent_upid',
+  'android_appid',
+  'arg_set_id',
+  'active_in_window_sec',
+  'start_ts_sec',
+  'end_ts_sec',
+];
+
+function processListExtraRank(key: string): number {
+  const i = PROCESS_LIST_EXTRA_KEY_ORDER.indexOf(key);
+  return i === -1 ? 1000 + key.charCodeAt(0) : i;
+}
+
+function getProcessListColumnWidth(key: string): number {
+  if (key === 'name' || key === 'process') return 160;
+  if (key === 'status') return 88;
+  if (key === 'window_start_sec' || key === 'window_end_sec' || key === 'start_ts_sec' || key === 'end_ts_sec') return 120;
+  if (key === 'uid' || key === 'pid') return 88;
+  return 100;
+}
+
+function formatProcessListDetailValue(key: string, value: unknown, traceStartSec: number): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (key === 'active_in_window_sec') {
+    const n = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(n) ? `${n.toFixed(3)} s` : String(value);
+  }
+  if (isAbsoluteTraceTimeColumn(key)) {
+    return `${toRelativeTraceSecDisplay(value, traceStartSec, relativeTraceSecFractionDigits(key))} s`;
+  }
+  return String(value);
+}
 
 function App() {
   const [dataset, setDataset] = useState<TraceDataset | null>(null);
@@ -19,6 +78,36 @@ function App() {
   const traceDurationSec = Math.max(0, traceEndSec - traceStartSec);
 
   const activePlugin = useMemo(() => PLUGINS.find((p) => p.id === activePluginId)!, [activePluginId]);
+  const showThreadFilter = activePlugin.id !== 'process-list';
+
+  const [processListHover, setProcessListHover] = useState<{
+    record: Record<string, unknown>;
+    x: number;
+    y: number;
+  } | null>(null);
+  const processListLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelProcessListHide = () => {
+    if (processListLeaveTimerRef.current) {
+      clearTimeout(processListLeaveTimerRef.current);
+      processListLeaveTimerRef.current = null;
+    }
+  };
+
+  const scheduleProcessListHide = () => {
+    cancelProcessListHide();
+    processListLeaveTimerRef.current = setTimeout(() => {
+      setProcessListHover(null);
+      processListLeaveTimerRef.current = null;
+    }, 200);
+  };
+
+  useEffect(() => {
+    cancelProcessListHide();
+    setProcessListHover(null);
+  }, [activePluginId, result]);
+
+  useEffect(() => () => cancelProcessListHide(), []);
 
   const processOptions = useMemo(() => {
     if (!dataset) return [];
@@ -91,21 +180,145 @@ function App() {
     }
   };
 
-  const tableColumns = useMemo(() => {
-    if (!result?.rows?.length) return [];
-    return Object.keys(result.rows[0]).map((k) => ({ title: k, dataIndex: k, key: k }));
-  }, [result]);
+  const { tableColumns, tableScrollX } = useMemo(() => {
+    if (!result?.rows?.length) return { tableColumns: [], tableScrollX: 0 };
+    const row0 = result.rows[0] as Record<string, unknown>;
+
+    if (activePluginId === 'process-list') {
+      const keys = (PROCESS_LIST_TABLE_KEYS as readonly string[]).filter((k) =>
+        Object.prototype.hasOwnProperty.call(row0, k),
+      );
+      const scrollX = Math.max(640, keys.reduce((acc, k) => acc + getProcessListColumnWidth(k), 0));
+      const cols = keys.map((k) => ({
+        title: k,
+        dataIndex: k,
+        key: k,
+        width: getProcessListColumnWidth(k),
+        ellipsis: true as const,
+        render: isAbsoluteTraceTimeColumn(k)
+          ? (v: unknown) => toRelativeTraceSecDisplay(v, traceStartSec, relativeTraceSecFractionDigits(k))
+          : undefined,
+      }));
+      return { tableColumns: cols, tableScrollX: scrollX };
+    }
+
+    const keys = Object.keys(row0);
+    const scrollX = Math.max(720, keys.reduce((acc, k) => acc + getResultColumnWidth(k), 0));
+    const cols = keys.map((k) => ({
+      title: isAbsoluteTraceTimeColumn(k) ? `${k} (rel s)` : k,
+      dataIndex: k,
+      key: k,
+      width: getResultColumnWidth(k),
+      ellipsis: true as const,
+      render:
+        k === 'active_in_window_sec'
+          ? (v: unknown) => {
+              const n = typeof v === 'number' ? v : Number(v);
+              return Number.isFinite(n) ? n.toFixed(3) : String(v ?? '');
+            }
+          : isAbsoluteTraceTimeColumn(k)
+            ? (v: unknown) => toRelativeTraceSecDisplay(v, traceStartSec, relativeTraceSecFractionDigits(k))
+            : undefined,
+    }));
+    return { tableColumns: cols, tableScrollX: scrollX };
+  }, [result, traceStartSec, activePluginId]);
+
+  const tableRowKey = (record: Record<string, unknown>, index?: number) => {
+    const i = index ?? 0;
+    const id = record.upid ?? record.pid ?? record.ts_sec ?? record.bucket_ts_sec ?? i;
+    return `${i}-${String(id)}`;
+  };
 
   const lineOption = useMemo(() => {
     if (!result?.rows?.length || activePlugin.id !== 'thread-trend') return null;
     return {
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: result.rows.map((r) => Number(r.bucket_ts_sec).toFixed(3)) },
+      xAxis: {
+        type: 'category',
+        name: 'Relative time (s)',
+        data: result.rows.map((r) => roundRelativeSec(Number(r.bucket_ts_sec) - traceStartSec, 3).toFixed(3)),
+      },
       yAxis: { type: 'value' },
       series: [{ type: 'line', smooth: true, data: result.rows.map((r) => Number(r.thread_count ?? 0)) }],
       grid: { left: 32, right: 24, top: 20, bottom: 32 },
     };
-  }, [result, activePlugin.id]);
+  }, [result, activePlugin.id, traceStartSec]);
+
+  const rawRowsJson = useMemo(() => {
+    const rows = result?.rows ?? [];
+    if (!rows.length) return '[]';
+    return JSON.stringify(mapRowsToRelativeTraceTimes(rows, traceStartSec), null, 2);
+  }, [result?.rows, traceStartSec]);
+
+  const processListHoverPortal =
+    processListHover && activePlugin.id === 'process-list'
+      ? (() => {
+          const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
+          const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+          const panelW = 400;
+          const panelH = 300;
+          const left = Math.max(8, Math.min(processListHover.x, vw - panelW - 8));
+          const top = Math.max(8, Math.min(processListHover.y, vh - panelH - 8));
+          const extraRows = Object.entries(processListHover.record)
+            .filter(([k]) => !(PROCESS_LIST_TABLE_KEYS as readonly string[]).includes(k))
+            .sort((a, b) => processListExtraRank(a[0]) - processListExtraRank(b[0]) || a[0].localeCompare(b[0]));
+          return createPortal(
+            <div
+              role="tooltip"
+              style={{
+                position: 'fixed',
+                left,
+                top,
+                zIndex: 2000,
+                width: panelW,
+                maxHeight: panelH,
+                overflow: 'auto',
+                pointerEvents: 'auto',
+                boxShadow: '0 8px 24px rgba(15,23,42,0.18)',
+                borderRadius: 8,
+              }}
+              onMouseEnter={cancelProcessListHide}
+              onMouseLeave={scheduleProcessListHide}
+            >
+              <Card size="small" title="More fields" styles={{ body: { padding: 12 } }}>
+                {extraRows.length ? (
+                  <Descriptions column={1} size="small" styles={{ label: { width: 140 } }}>
+                    {extraRows.map(([k, v]) => (
+                      <Descriptions.Item key={k} label={k}>
+                        <Typography.Text
+                          style={{ wordBreak: 'break-word' }}
+                          copyable={typeof v === 'string' && String(v).length > 80 ? { text: String(v) } : false}
+                        >
+                          {formatProcessListDetailValue(k, v, traceStartSec)}
+                        </Typography.Text>
+                      </Descriptions.Item>
+                    ))}
+                  </Descriptions>
+                ) : (
+                  <Typography.Text type="secondary">No more fields</Typography.Text>
+                )}
+              </Card>
+            </div>,
+            document.body,
+          );
+        })()
+      : null;
+
+  const processListTableOnRow =
+    activePlugin.id === 'process-list'
+      ? (record: Record<string, unknown>) => ({
+          onMouseEnter: (e: { clientX: number; clientY: number }) => {
+            cancelProcessListHide();
+            setProcessListHover({ record, x: e.clientX + 10, y: e.clientY + 10 });
+          },
+          onMouseMove: (e: { clientX: number; clientY: number }) => {
+            setProcessListHover((prev) =>
+              prev?.record === record ? { record, x: e.clientX + 10, y: e.clientY + 10 } : prev,
+            );
+          },
+          onMouseLeave: scheduleProcessListHide,
+        })
+      : undefined;
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -171,18 +384,20 @@ function App() {
                     onChange={(v) => setParams((p) => ({ ...p, process: v ?? '' }))}
                   />
                 </Col>
-                <Col span={5}>
-                  <Select
-                    allowClear
-                    showSearch
-                    optionFilterProp="label"
-                    placeholder="线程"
-                    style={{ width: '100%' }}
-                    options={threadOptions}
-                    value={params.thread || undefined}
-                    onChange={(v) => setParams((p) => ({ ...p, thread: v ?? '' }))}
-                  />
-                </Col>
+                {showThreadFilter ? (
+                  <Col span={5}>
+                    <Select
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                      placeholder="线程"
+                      style={{ width: '100%' }}
+                      options={threadOptions}
+                      value={params.thread || undefined}
+                      onChange={(v) => setParams((p) => ({ ...p, thread: v ?? '' }))}
+                    />
+                  </Col>
+                ) : null}
                 <Col span={4}><Input placeholder="事件关键字" value={params.keyword} onChange={(e) => setParams((p) => ({ ...p, keyword: e.target.value }))} /></Col>
                 <Col span={2}><Button type="primary" block loading={running} onClick={onRun}>运行</Button></Col>
               </Row>
@@ -200,7 +415,21 @@ function App() {
                 {
                   key: 'viz',
                   label: '可视化结果',
-                  children: activePlugin.id === 'thread-trend' && lineOption ? <ReactECharts option={lineOption} style={{ height: 320 }} /> : <Table rowKey={(r) => JSON.stringify(r)} size="small" columns={tableColumns} dataSource={result?.rows ?? []} pagination={{ pageSize: 10 }} />,
+                  children: activePlugin.id === 'thread-trend' && lineOption ? (
+                    <ReactECharts option={lineOption} style={{ height: 320 }} />
+                  ) : (
+                    <Table<Record<string, unknown>>
+                      rowKey={tableRowKey}
+                      size="small"
+                      sticky
+                      tableLayout="fixed"
+                      scroll={tableScrollX ? { x: tableScrollX } : undefined}
+                      columns={tableColumns}
+                      dataSource={result?.rows ?? []}
+                      pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: [20, 50, 100, 200] }}
+                      onRow={processListTableOnRow}
+                    />
+                  ),
                 },
                 {
                   key: 'sql',
@@ -210,7 +439,7 @@ function App() {
                 {
                   key: 'raw',
                   label: '原始数据',
-                  children: <pre style={{ margin: 0, background: '#f6f8fa', padding: 12, borderRadius: 8, maxHeight: 320, overflow: 'auto' }}>{JSON.stringify(result?.rows ?? [], null, 2)}</pre>,
+                  children: <pre style={{ margin: 0, background: '#f6f8fa', padding: 12, borderRadius: 8, maxHeight: 320, overflow: 'auto' }}>{rawRowsJson}</pre>,
                 },
               ]} />
               {result?.stats?.length ? (
@@ -222,6 +451,7 @@ function App() {
           </Space>
         </Content>
       </Layout>
+      {processListHoverPortal}
     </Layout>
   );
 }

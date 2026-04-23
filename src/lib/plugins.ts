@@ -118,6 +118,49 @@ GROUP BY process, thread, t.tid, state
 ORDER BY state_dur_ms DESC
 LIMIT 5000;`,
   },
+  {
+    id: 'process-list',
+    name: '进程列表',
+    description: '列举时间范围内匹配的进程信息',
+    outputType: 'table',
+    sqlTemplate: `WITH params AS (
+  SELECT
+    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
+    CAST({{endSec}} * 1e9 AS INT) AS end_ns
+)
+SELECT
+  p.upid,
+  p.pid,
+  p.name AS name,
+  COALESCE(p.name, printf('pid_%d', p.pid)) AS process,
+  p.uid,
+  COALESCE(p.cmdline, '') AS cmdline,
+  p.parent_upid,
+  CASE WHEN p.start_ts IS NULL THEN NULL ELSE ROUND(p.start_ts / 1e9, 6) END AS start_ts_sec,
+  CASE WHEN p.end_ts IS NULL THEN NULL ELSE ROUND(p.end_ts / 1e9, 6) END AS end_ts_sec,
+  p.android_appid,
+  p.arg_set_id,
+  CASE
+    WHEN p.end_ts IS NULL THEN '运行中'
+    ELSE '已结束'
+  END AS status,
+  ROUND(
+    (
+      MIN(COALESCE(p.end_ts, ts.end_ns), ts.end_ns) -
+      MAX(COALESCE(p.start_ts, 0), ts.start_ns)
+    ) / 1e9,
+    3
+  ) AS active_in_window_sec,
+  ROUND(MAX(COALESCE(p.start_ts, 0), ts.start_ns) / 1e9, 6) AS window_start_sec,
+  ROUND(MIN(COALESCE(p.end_ts, ts.end_ns), ts.end_ns) / 1e9, 6) AS window_end_sec
+FROM process p
+JOIN params ts
+WHERE COALESCE(p.name, '') LIKE '%{{process}}%'
+  AND COALESCE(p.start_ts, 0) <= ts.end_ns
+  AND COALESCE(p.end_ts, ts.end_ns) >= ts.start_ns
+ORDER BY active_in_window_sec DESC, p.upid ASC
+LIMIT 5000;`,
+  },
 ];
 
 export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
