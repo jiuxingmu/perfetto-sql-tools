@@ -75,6 +75,8 @@ export function buildPluginSpecificParamFields({
   isThreadBlocked,
   isCpuUsageAnalysis,
   isMainThreadJankAnalysis,
+  isWaitReasonAnalysis,
+  isProcessListOverview,
   setActiveParams,
 }: Pick<SharedArgs, 'activeParams' | 'setActiveParams'> & {
   isEventAggregate: boolean;
@@ -82,6 +84,8 @@ export function buildPluginSpecificParamFields({
   isThreadBlocked: boolean;
   isCpuUsageAnalysis: boolean;
   isMainThreadJankAnalysis: boolean;
+  isWaitReasonAnalysis: boolean;
+  isProcessListOverview: boolean;
 }): ParamFieldDraft[] {
   return [
     {
@@ -191,6 +195,102 @@ export function buildPluginSpecificParamFields({
       ),
     },
     {
+      key: 'processTopN',
+      label: 'Top N',
+      visible: isProcessListOverview,
+      control: (
+        <Input
+          type="number"
+          min={1}
+          max={200}
+          value={activeParams.topN ?? 20}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, topN: Number.isFinite(value) ? value : 20 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'processPid',
+      label: 'PID(可选)',
+      visible: isProcessListOverview,
+      control: (
+        <Input
+          type="number"
+          placeholder="不填表示全部"
+          value={activeParams.pid}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, pid: Number.isFinite(value) ? value : undefined }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'processUid',
+      label: 'UID(可选)',
+      visible: isProcessListOverview,
+      control: (
+        <Input
+          type="number"
+          placeholder="不填表示全部"
+          value={activeParams.uid}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, uid: Number.isFinite(value) ? value : undefined }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'processStatus',
+      label: '状态',
+      visible: isProcessListOverview,
+      control: (
+        <Select
+          style={{ width: '100%' }}
+          value={activeParams.statusFilter ?? ''}
+          onChange={(v) => setActiveParams((p) => ({ ...p, statusFilter: v as QueryParams['statusFilter'] }))}
+          options={[
+            { label: '全部', value: '' },
+            { label: '运行中', value: 'running' },
+            { label: '已结束', value: 'ended' },
+          ]}
+        />
+      ),
+    },
+    {
+      key: 'processSortBy',
+      label: '排序字段',
+      visible: isProcessListOverview,
+      control: (
+        <Select
+          style={{ width: '100%' }}
+          value={activeParams.sortBy ?? 'cpu_time'}
+          onChange={(v) => setActiveParams((p) => ({ ...p, sortBy: v as QueryParams['sortBy'] }))}
+          options={[
+            { label: 'CPU 时间', value: 'cpu_time' },
+            { label: '线程数', value: 'thread_count' },
+            { label: '活跃时长', value: 'active_duration' },
+          ]}
+        />
+      ),
+    },
+    {
+      key: 'processOnlyActive',
+      label: '仅活跃进程',
+      visible: isProcessListOverview,
+      control: (
+        <div className="param-switch-wrap">
+          <Switch
+            checked={(activeParams.onlyActive ?? 1) === 1}
+            onChange={(checked) => setActiveParams((p) => ({ ...p, onlyActive: checked ? 1 : 0 }))}
+          />
+        </div>
+      ),
+    },
+    {
       key: 'jankThreadName',
       label: '线程名(可选)',
       visible: isMainThreadJankAnalysis,
@@ -254,6 +354,84 @@ export function buildPluginSpecificParamFields({
       key: 'jankOnlyMainThread',
       label: '仅主线程',
       visible: isMainThreadJankAnalysis,
+      control: (
+        <div className="param-switch-wrap">
+          <Switch
+            checked={(activeParams.onlyMainThread ?? 1) === 1}
+            onChange={(checked) => setActiveParams((p) => ({ ...p, onlyMainThread: checked ? 1 : 0 }))}
+          />
+        </div>
+      ),
+    },
+    {
+      key: 'waitThreadName',
+      label: '线程名(可选)',
+      visible: isWaitReasonAnalysis,
+      control: (
+        <Input
+          placeholder="线程名模糊匹配"
+          value={activeParams.thread}
+          onChange={(e) => setActiveParams((p) => ({ ...p, thread: e.target.value }))}
+        />
+      ),
+    },
+    {
+      key: 'waitTid',
+      label: 'TID(可选)',
+      visible: isWaitReasonAnalysis,
+      control: (
+        <Input
+          type="number"
+          placeholder="不填表示全部"
+          value={activeParams.tid}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, tid: Number.isFinite(value) ? value : undefined }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'waitBlockedThreshold',
+      label: '阻塞阈值(ms)',
+      visible: isWaitReasonAnalysis,
+      control: (
+        <Input
+          type="number"
+          min={1}
+          value={activeParams.blockedThresholdMs ?? 5}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, blockedThresholdMs: Number.isFinite(value) ? value : 5 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'waitTypeFilter',
+      label: '等待类型',
+      visible: isWaitReasonAnalysis,
+      control: (
+        <Select
+          style={{ width: '100%' }}
+          value={activeParams.waitTypeFilter ?? ''}
+          onChange={(v) => setActiveParams((p) => ({ ...p, waitTypeFilter: v as QueryParams['waitTypeFilter'] }))}
+          options={[
+            { label: '全部', value: '' },
+            { label: 'io', value: 'io' },
+            { label: 'lock', value: 'lock' },
+            { label: 'binder', value: 'binder' },
+            { label: 'futex', value: 'futex' },
+            { label: 'workqueue', value: 'workqueue' },
+            { label: 'schedule', value: 'schedule' },
+          ]}
+        />
+      ),
+    },
+    {
+      key: 'waitOnlyMain',
+      label: '仅主线程',
+      visible: isWaitReasonAnalysis,
       control: (
         <div className="param-switch-wrap">
           <Switch

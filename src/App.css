@@ -227,3 +227,7 @@
 .jank-selected-row > td {
   background: #fff7e6 !important;
 }
+
+.wait-selected-row > td {
+  background: #f6ffed !important;
+}

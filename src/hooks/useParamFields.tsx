@@ -11,6 +11,8 @@ type UseParamFieldsArgs = {
   isThreadBlocked: boolean;
   isCpuUsageAnalysis: boolean;
   isMainThreadJankAnalysis: boolean;
+  isWaitReasonAnalysis: boolean;
+  isProcessListOverview: boolean;
   traceDurationSec: number;
   setActiveParams: (updater: (p: QueryParams) => QueryParams) => void;
 };
@@ -24,6 +26,8 @@ export function useParamFields({
   isThreadBlocked,
   isCpuUsageAnalysis,
   isMainThreadJankAnalysis,
+  isWaitReasonAnalysis,
+  isProcessListOverview,
   traceDurationSec,
   setActiveParams,
 }: UseParamFieldsArgs) {
@@ -43,6 +47,8 @@ export function useParamFields({
         isThreadBlocked,
         isCpuUsageAnalysis,
         isMainThreadJankAnalysis,
+        isWaitReasonAnalysis,
+        isProcessListOverview,
         setActiveParams,
       }),
     ];
@@ -55,6 +61,8 @@ export function useParamFields({
     isThreadBlocked,
     isCpuUsageAnalysis,
     isMainThreadJankAnalysis,
+    isWaitReasonAnalysis,
+    isProcessListOverview,
     isThreadTrend,
     processOptions,
     setActiveParams,

@@ -4,6 +4,8 @@ import type { PluginDefinition, QueryResult } from '../../types';
 import type { TableRowHoverHandler } from '../workbench/WorkbenchTypes';
 import { CpuResultPanel } from '../cpu';
 import { JankResultPanel } from '../jank';
+import { ProcessOverviewPanel } from '../process';
+import { WaitResultPanel } from '../wait';
 
 type VisualizationPanelProps = {
   activePluginId: PluginDefinition['id'];
@@ -32,6 +34,12 @@ export function VisualizationPanel({
   }
   if (activePluginId === 'main-thread-jank-analysis') {
     return <JankResultPanel activeResult={activeResult} />;
+  }
+  if (activePluginId === 'wait-reason-analysis') {
+    return <WaitResultPanel activeResult={activeResult} />;
+  }
+  if (activePluginId === 'process-list') {
+    return <ProcessOverviewPanel activeResult={activeResult} />;
   }
 
   return (

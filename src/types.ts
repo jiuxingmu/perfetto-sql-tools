@@ -20,7 +20,8 @@ export type PluginId =
   | 'thread-detail'
   | 'thread-blocked'
   | 'cpu-usage-analysis'
-  | 'main-thread-jank-analysis';
+  | 'main-thread-jank-analysis'
+  | 'wait-reason-analysis';
 
 export type QueryParams = {
   startSec: number;
@@ -35,7 +36,13 @@ export type QueryParams = {
   onlyMainThread?: number;
   frameThresholdMs?: number;
   slowFrameThresholdMs?: number;
+  blockedThresholdMs?: number;
+  waitTypeFilter?: '' | 'io' | 'lock' | 'binder' | 'futex' | 'workqueue' | 'schedule';
   statLevel?: 'process' | 'thread';
+  sortBy?: 'cpu_time' | 'thread_count' | 'active_duration';
+  onlyActive?: number;
+  uid?: number;
+  statusFilter?: '' | 'running' | 'ended';
   suspiciousOnly?: number;
   aggregateOrder?: 'avg_desc' | 'total_desc' | 'count_desc';
 };

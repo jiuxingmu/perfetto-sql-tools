@@ -2,6 +2,110 @@ import type { PluginDefinition, QueryParams, QueryResult } from '../types';
 
 export const PLUGINS: PluginDefinition[] = [
   {
+    id: 'wait-reason-analysis',
+    name: '等待原因归因分析',
+    description: '识别阻塞片段并归因等待类型',
+    outputType: 'table',
+    sqlTemplate: `WITH params AS (
+  SELECT
+    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
+    CAST({{endSec}} * 1e9 AS INT) AS end_ns,
+    CAST({{pid}} AS INT) AS target_pid,
+    CAST({{tid}} AS INT) AS target_tid,
+    CAST(MAX(1, {{blockedThresholdMs}} * 1e6) AS INT) AS blocked_threshold_ns,
+    CAST(MAX(0, {{onlyMainThread}}) AS INT) AS only_main_thread
+),
+trace_window AS (
+  SELECT start_ts AS trace_start_ns
+  FROM trace_bounds
+  LIMIT 1
+),
+candidate AS (
+  SELECT
+    ts.utid,
+    ts.ts AS blocked_start_ts_ns,
+    ts.ts + COALESCE(ts.dur, 0) AS blocked_end_ts_ns,
+    COALESCE(ts.dur, 0) AS blocked_dur_ns,
+    COALESCE(ts.state, '') AS blocked_state,
+    COALESCE(ts.io_wait, 0) AS io_wait,
+    COALESCE(ts.blocked_function, '') AS blocked_function,
+    t.tid,
+    COALESCE(t.name, printf('tid_%d', t.tid)) AS thread_name,
+    COALESCE(t.is_main_thread, CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END) AS is_main_thread,
+    p.pid,
+    COALESCE(p.name, printf('pid_%d', p.pid)) AS process_name,
+    ts.waker_utid
+  FROM thread_state ts
+  JOIN thread t ON ts.utid = t.utid
+  LEFT JOIN process p ON t.upid = p.upid
+  JOIN params x
+  WHERE ts.ts < x.end_ns
+    AND (ts.ts + COALESCE(ts.dur, 0)) > x.start_ns
+    AND COALESCE(ts.dur, 0) >= x.blocked_threshold_ns
+    AND COALESCE(ts.state, '') NOT IN ('R', 'Running')
+    AND (
+      COALESCE(ts.state, '') IN ('D', 'S', 'T', 't', 'X', 'x', 'K', 'W', 'I')
+      OR COALESCE(ts.io_wait, 0) = 1
+      OR COALESCE(ts.blocked_function, '') <> ''
+    )
+    AND ('{{process}}' = '' OR COALESCE(p.name, '') = '{{process}}')
+    AND ('{{thread}}' = '' OR COALESCE(t.name, '') LIKE '%' || '{{thread}}' || '%')
+    AND (x.target_pid <= 0 OR COALESCE(p.pid, -1) = x.target_pid)
+    AND (x.target_tid <= 0 OR COALESCE(t.tid, -1) = x.target_tid)
+    AND (x.only_main_thread = 0 OR COALESCE(t.is_main_thread, CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END) = 1)
+),
+enriched AS (
+  SELECT
+    c.*,
+    COALESCE(wt.name, '') AS waker_thread,
+    COALESCE(wp.name, '') AS waker_process,
+    CASE
+      WHEN c.io_wait = 1 OR LOWER(c.blocked_function) LIKE '%io%' THEN 'io'
+      WHEN LOWER(c.blocked_function) LIKE '%futex%' THEN 'futex'
+      WHEN LOWER(c.blocked_function) LIKE '%binder%' OR LOWER(c.thread_name) LIKE '%binder%' THEN 'binder'
+      WHEN LOWER(c.blocked_function) LIKE '%mutex%' OR LOWER(c.blocked_function) LIKE '%lock%' THEN 'lock'
+      WHEN LOWER(c.blocked_function) LIKE '%work%' OR LOWER(c.blocked_function) LIKE '%flush%' THEN 'workqueue'
+      WHEN c.blocked_state IN ('D', 'S', 'T', 't', 'X', 'x', 'K', 'W', 'I') THEN 'schedule'
+      WHEN LOWER(c.blocked_function) LIKE '%read%' OR LOWER(c.blocked_function) LIKE '%write%' OR LOWER(c.blocked_function) LIKE '%fs%' THEN 'unknown_io'
+      WHEN LOWER(c.blocked_function) LIKE '%sync%' OR LOWER(c.blocked_function) LIKE '%wait%' THEN 'unknown_sync'
+      WHEN LOWER(c.blocked_function) LIKE '%kernel%' OR c.blocked_state IN ('D', 'S', 'I') THEN 'unknown_kernel'
+      ELSE 'unknown_other'
+    END AS wait_type
+  FROM candidate c
+  LEFT JOIN thread wt ON c.waker_utid = wt.utid
+  LEFT JOIN process wp ON wt.upid = wp.upid
+)
+SELECT
+  ROUND((e.blocked_start_ts_ns - tw.trace_start_ns) / 1e9, 3) AS blocked_start_ts,
+  ROUND((e.blocked_end_ts_ns - tw.trace_start_ns) / 1e9, 3) AS blocked_end_ts,
+  ROUND(e.blocked_dur_ns / 1e6, 3) AS blocked_dur_ms,
+  e.wait_type,
+  e.blocked_state,
+  e.blocked_function,
+  e.waker_thread,
+  e.waker_process,
+  e.process_name,
+  e.pid,
+  e.tid,
+  CASE
+    WHEN e.wait_type = 'io' THEN 'IO 等待'
+    WHEN e.wait_type = 'lock' THEN '锁等待'
+    WHEN e.wait_type = 'binder' THEN 'Binder 等待'
+    WHEN e.wait_type = 'futex' THEN 'futex 等待'
+    WHEN e.wait_type = 'workqueue' THEN 'workqueue/flush 等待'
+    WHEN e.wait_type = 'schedule' THEN '调度或内核等待'
+    WHEN e.wait_type = 'unknown_io' THEN '未知等待(IO 相关)'
+    WHEN e.wait_type = 'unknown_sync' THEN '未知等待(同步相关)'
+    WHEN e.wait_type = 'unknown_kernel' THEN '未知等待(内核态等待)'
+    ELSE '未知等待'
+  END AS blocked_reason
+FROM enriched e
+LEFT JOIN trace_window tw
+WHERE ('{{waitTypeFilter}}' = '' OR e.wait_type = '{{waitTypeFilter}}')
+ORDER BY e.blocked_dur_ns DESC, e.blocked_start_ts_ns ASC
+LIMIT 5000;`,
+  },
+  {
     id: 'main-thread-jank-analysis',
     name: '主线程卡顿分析',
     description: '识别主线程慢帧与卡顿区间',
@@ -250,14 +354,19 @@ LIMIT 1000;`,
   },
   {
     id: 'process-list',
-    name: '进程信息列表',
-    description: '时间范围内的进程明细',
+    name: '进程画像总览',
+    description: '时间范围内的进程风险画像与分析入口',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
     CAST({{startSec}} * 1e9 AS INT) AS start_ns,
-    CAST({{endSec}} * 1e9 AS INT) AS end_ns
-)
+    CAST({{endSec}} * 1e9 AS INT) AS end_ns,
+    CAST(MAX(1, {{topN}}) AS INT) AS top_n,
+    CAST(MAX(0, {{onlyActive}}) AS INT) AS only_active,
+    CAST({{pid}} AS INT) AS target_pid,
+    CAST({{uid}} AS INT) AS target_uid
+),
+process_base AS (
 SELECT
   p.upid,
   p.pid,
@@ -270,6 +379,8 @@ SELECT
   CASE WHEN p.end_ts IS NULL THEN NULL ELSE ROUND(p.end_ts / 1e9, 6) END AS end_ts_sec,
   p.android_appid,
   p.arg_set_id,
+  COALESCE(p.start_ts, 0) AS start_ts_ns,
+  COALESCE(p.end_ts, 9223372036854775807) AS end_ts_ns,
   CASE
     WHEN p.end_ts IS NULL THEN '运行中'
     ELSE '已结束'
@@ -286,10 +397,90 @@ SELECT
 FROM process p
 JOIN params ts
 WHERE COALESCE(p.name, '') LIKE '%{{process}}%'
+  AND (ts.target_pid <= 0 OR COALESCE(p.pid, -1) = ts.target_pid)
+  AND (ts.target_uid <= 0 OR COALESCE(p.uid, -1) = ts.target_uid)
   AND COALESCE(p.start_ts, 0) <= ts.end_ns
   AND COALESCE(p.end_ts, ts.end_ns) >= ts.start_ns
-ORDER BY active_in_window_sec DESC, p.upid ASC
-LIMIT 5000;`,
+),
+sched_agg AS (
+  SELECT
+    t.upid,
+    ROUND(SUM(
+      MAX(0, MIN(s.ts + COALESCE(s.dur, 0), x.end_ns) - MAX(s.ts, x.start_ns))
+    ) / 1e6, 3) AS cpu_time_ms
+  FROM sched s
+  JOIN thread t ON s.utid = t.utid
+  JOIN params x
+  WHERE s.ts < x.end_ns
+    AND (s.ts + COALESCE(s.dur, 0)) > x.start_ns
+  GROUP BY t.upid
+),
+thread_agg AS (
+  SELECT
+    upid,
+    COUNT(1) AS thread_count
+  FROM thread
+  GROUP BY upid
+),
+wait_top AS (
+  SELECT
+    sub.upid,
+    sub.wait_type AS top_wait_type
+  FROM (
+    SELECT
+      t.upid,
+      CASE
+        WHEN COALESCE(ts.io_wait, 0) = 1 OR LOWER(COALESCE(ts.blocked_function, '')) LIKE '%io%' THEN 'io'
+        WHEN LOWER(COALESCE(ts.blocked_function, '')) LIKE '%futex%' THEN 'futex'
+        WHEN LOWER(COALESCE(ts.blocked_function, '')) LIKE '%binder%' THEN 'binder'
+        WHEN LOWER(COALESCE(ts.blocked_function, '')) LIKE '%lock%' OR LOWER(COALESCE(ts.blocked_function, '')) LIKE '%mutex%' THEN 'lock'
+        ELSE 'schedule'
+      END AS wait_type,
+      COUNT(1) AS cnt,
+      ROW_NUMBER() OVER (
+        PARTITION BY t.upid
+        ORDER BY COUNT(1) DESC
+      ) AS rk
+    FROM thread_state ts
+    JOIN thread t ON ts.utid = t.utid
+    JOIN params x
+    WHERE ts.ts < x.end_ns
+      AND (ts.ts + COALESCE(ts.dur, 0)) > x.start_ns
+    GROUP BY t.upid, wait_type
+  ) sub
+  WHERE sub.rk = 1
+),
+process_profile AS (
+  SELECT
+    pb.*,
+    COALESCE(sa.cpu_time_ms, 0) AS cpu_time_ms,
+    COALESCE(ta.thread_count, 0) AS thread_count,
+    0 AS slow_frame_count,
+    COALESCE(wt.top_wait_type, 'schedule') AS top_wait_type
+  FROM process_base pb
+  LEFT JOIN sched_agg sa ON pb.upid = sa.upid
+  LEFT JOIN thread_agg ta ON pb.upid = ta.upid
+  LEFT JOIN wait_top wt ON pb.upid = wt.upid
+),
+scored AS (
+  SELECT
+    *,
+    CASE
+      WHEN cpu_time_ms > 0 THEN '查看 CPU 占用分析'
+      WHEN thread_count >= 60 THEN '查看线程信息列表'
+      ELSE '查看主线程卡顿分析'
+    END AS next_step
+  FROM process_profile
+)
+SELECT *
+FROM scored s
+WHERE ((SELECT only_active FROM params) = 0 OR s.active_in_window_sec > 0)
+  AND ('{{statusFilter}}' = '' OR (
+    ('{{statusFilter}}' = 'running' AND s.status = '运行中')
+    OR ('{{statusFilter}}' = 'ended' AND s.status = '已结束')
+  ))
+ORDER BY {{processOrderBy}}
+LIMIT (SELECT top_n FROM params);`,
   },
   {
     id: 'thread-detail',
@@ -439,6 +630,17 @@ export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
         return 'avg_dur_ms DESC, total_dur_ms DESC, s.name ASC';
     }
   })();
+  const processOrderBy = (() => {
+    switch (p.sortBy) {
+      case 'cpu_time':
+        return 's.cpu_time_ms DESC, s.thread_count DESC, s.upid ASC';
+      case 'thread_count':
+        return 's.thread_count DESC, s.cpu_time_ms DESC, s.upid ASC';
+      case 'active_duration':
+      default:
+        return 's.active_in_window_sec DESC, s.cpu_time_ms DESC, s.thread_count DESC, s.upid ASC';
+    }
+  })();
 
   return def.sqlTemplate
     .replaceAll('{{startSec}}', String(p.startSec))
@@ -451,6 +653,12 @@ export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
     .replaceAll('{{topN}}', String(Math.max(1, Number(p.topN ?? 10))))
     .replaceAll('{{frameThresholdMs}}', String(Math.max(1, Number(p.frameThresholdMs ?? 16.6))))
     .replaceAll('{{slowFrameThresholdMs}}', String(Math.max(1, Number(p.slowFrameThresholdMs ?? 33))))
+    .replaceAll('{{blockedThresholdMs}}', String(Math.max(1, Number(p.blockedThresholdMs ?? 5))))
+    .replaceAll('{{waitTypeFilter}}', p.waitTypeFilter ?? '')
+    .replaceAll('{{uid}}', String(Math.max(0, Number(p.uid ?? 0))))
+    .replaceAll('{{statusFilter}}', p.statusFilter ?? '')
+    .replaceAll('{{onlyActive}}', String(Math.max(0, Math.min(1, Number(p.onlyActive ?? 1)))))
+    .replaceAll('{{processOrderBy}}', processOrderBy)
     .replaceAll('{{onlyMainThread}}', String(Math.max(0, Math.min(1, Number(p.onlyMainThread ?? 0)))))
     .replaceAll('{{statLevel}}', p.statLevel === 'process' ? 'process' : 'thread')
     .replaceAll('{{aggregateOrderBy}}', aggregateOrderBy)
@@ -502,6 +710,24 @@ function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): 
       { label: '慢帧占比', value: total ? `${((slowRows.length / total) * 100).toFixed(2)}%` : '0%' },
       { label: '最大帧耗时(ms)', value: Number(maxDur.toFixed(3)) },
       { label: '平均帧耗时(ms)', value: Number(avgDur.toFixed(3)) },
+    ];
+  }
+  if (plugin.id === 'wait-reason-analysis') {
+    const totalDur = rows.reduce((acc, row) => acc + Number(row.blocked_dur_ms ?? 0), 0);
+    const totalCount = rows.length;
+    const maxDur = rows.reduce((acc, row) => Math.max(acc, Number(row.blocked_dur_ms ?? 0)), 0);
+    const byType = rows.reduce<Record<string, number>>((acc, row) => {
+      const key = String(row.wait_type ?? 'unknown');
+      acc[key] = (acc[key] ?? 0) + Number(row.blocked_dur_ms ?? 0);
+      return acc;
+    }, {});
+    const mainType = Object.entries(byType).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '-';
+    return [
+      { label: '总等待时长(ms)', value: Number(totalDur.toFixed(2)) },
+      { label: '等待次数', value: totalCount },
+      { label: '最长等待时长(ms)', value: Number(maxDur.toFixed(3)) },
+      { label: '主要等待类型', value: mainType },
+      { label: '等待类型数', value: Object.keys(byType).length },
     ];
   }
   return undefined;

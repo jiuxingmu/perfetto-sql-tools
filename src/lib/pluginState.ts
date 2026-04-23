@@ -6,6 +6,7 @@ export const PLUGIN_DISPLAY_ORDER: PluginDefinition['id'][] = [
   'thread-detail',
   'cpu-usage-analysis',
   'main-thread-jank-analysis',
+  'wait-reason-analysis',
   'thread-trend',
   'thread-blocked',
   'event-aggregate',
@@ -18,9 +19,15 @@ export function createDefaultParams(defaultEndSec: number): QueryParams {
     pid: undefined,
     bucketMs: 1000,
     topN: 10,
-    onlyMainThread: 0,
+    onlyMainThread: 1,
     frameThresholdMs: 16.6,
     slowFrameThresholdMs: 33,
+    blockedThresholdMs: 5,
+    waitTypeFilter: '',
+    sortBy: 'cpu_time',
+    onlyActive: 1,
+    uid: undefined,
+    statusFilter: '',
     tid: undefined,
     statLevel: 'thread',
     process: '',
@@ -32,7 +39,14 @@ export function createDefaultParams(defaultEndSec: number): QueryParams {
 }
 
 export function createParamsByPlugin(defaultEndSec: number): Record<PluginDefinition['id'], QueryParams> {
-  return Object.fromEntries(
-    PLUGINS.map((plugin) => [plugin.id, createDefaultParams(defaultEndSec)]),
-  ) as Record<PluginDefinition['id'], QueryParams>;
+  return Object.fromEntries(PLUGINS.map((plugin) => {
+    const base = createDefaultParams(defaultEndSec);
+    if (plugin.id === 'cpu-usage-analysis') {
+      return [plugin.id, { ...base, onlyMainThread: 0 }];
+    }
+    if (plugin.id === 'main-thread-jank-analysis' || plugin.id === 'wait-reason-analysis') {
+      return [plugin.id, { ...base, onlyMainThread: 1 }];
+    }
+    return [plugin.id, base];
+  })) as Record<PluginDefinition['id'], QueryParams>;
 }
