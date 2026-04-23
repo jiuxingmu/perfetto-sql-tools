@@ -420,7 +420,15 @@ function App() {
                     />
                   </Col>
                 ) : null}
-                <Col span={4}><Input placeholder="事件关键字" value={params.keyword} onChange={(e) => setParams((p) => ({ ...p, keyword: e.target.value }))} /></Col>
+                {activePlugin.id !== 'process-list' ? (
+                  <Col span={4}>
+                    <Input
+                      placeholder="事件关键字"
+                      value={params.keyword}
+                      onChange={(e) => setParams((p) => ({ ...p, keyword: e.target.value }))}
+                    />
+                  </Col>
+                ) : null}
                 <Col span={2}><Button type="primary" block loading={running} onClick={onRun}>运行</Button></Col>
               </Row>
               {activePlugin.id === 'thread-trend' && (
