@@ -2,6 +2,95 @@ import type { PluginDefinition, QueryParams, QueryResult } from '../types';
 
 export const PLUGINS: PluginDefinition[] = [
   {
+    id: 'main-thread-jank-analysis',
+    name: '主线程卡顿分析',
+    description: '识别主线程慢帧与卡顿区间',
+    outputType: 'table',
+    sqlTemplate: `WITH params AS (
+  SELECT
+    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
+    CAST({{endSec}} * 1e9 AS INT) AS end_ns,
+    CAST({{pid}} AS INT) AS target_pid,
+    CAST({{tid}} AS INT) AS target_tid,
+    CAST(MAX(1, {{frameThresholdMs}} * 1e6) AS INT) AS frame_threshold_ns,
+    CAST(MAX(1, {{slowFrameThresholdMs}} * 1e6) AS INT) AS slow_frame_threshold_ns,
+    CAST(MAX(0, {{onlyMainThread}}) AS INT) AS only_main_thread
+),
+trace_window AS (
+  SELECT start_ts AS trace_start_ns
+  FROM trace_bounds
+  LIMIT 1
+),
+thread_scope AS (
+  SELECT
+    t.utid,
+    t.tid,
+    COALESCE(t.name, printf('tid_%d', t.tid)) AS thread_name,
+    COALESCE(t.is_main_thread, CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END) AS is_main_thread,
+    p.pid,
+    COALESCE(p.name, printf('pid_%d', p.pid)) AS process_name
+  FROM thread t
+  LEFT JOIN process p ON t.upid = p.upid
+  JOIN params x
+  WHERE ('{{process}}' = '' OR COALESCE(p.name, '') = '{{process}}')
+    AND ('{{thread}}' = '' OR COALESCE(t.name, '') LIKE '%' || '{{thread}}' || '%')
+    AND (x.target_pid <= 0 OR COALESCE(p.pid, -1) = x.target_pid)
+    AND (x.target_tid <= 0 OR COALESCE(t.tid, -1) = x.target_tid)
+    AND (x.only_main_thread = 0 OR COALESCE(t.is_main_thread, CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END) = 1)
+),
+main_sched AS (
+  SELECT
+    s.ts AS frame_start_ts,
+    s.ts + COALESCE(s.dur, 0) AS frame_end_ts,
+    COALESCE(s.dur, 0) AS frame_dur_ns,
+    ts.thread_name,
+    ts.process_name,
+    ts.pid,
+    ts.tid,
+    ts.is_main_thread
+  FROM sched s
+  JOIN thread_scope ts ON s.utid = ts.utid
+  JOIN params x
+  WHERE s.ts < x.end_ns
+    AND (s.ts + COALESCE(s.dur, 0)) > x.start_ns
+    AND COALESCE(s.dur, 0) > 0
+),
+slice_ctx AS (
+  SELECT
+    ms.frame_start_ts,
+    ms.frame_end_ts,
+    MAX(COALESCE(sl.name, '')) AS top_slice_name
+  FROM main_sched ms
+  LEFT JOIN thread_track tt ON tt.utid = (SELECT utid FROM thread_scope WHERE tid = ms.tid LIMIT 1)
+  LEFT JOIN slice sl
+    ON sl.track_id = tt.id
+   AND sl.ts < ms.frame_end_ts
+   AND (sl.ts + COALESCE(sl.dur, 0)) > ms.frame_start_ts
+  GROUP BY ms.frame_start_ts, ms.frame_end_ts
+)
+SELECT
+  ROUND((ms.frame_start_ts - tw.trace_start_ns) / 1e9, 3) AS frame_start_ts,
+  ROUND((ms.frame_end_ts - tw.trace_start_ns) / 1e9, 3) AS frame_end_ts,
+  ROUND(ms.frame_dur_ns / 1e6, 3) AS frame_dur_ms,
+  CASE WHEN ms.frame_dur_ns >= (SELECT frame_threshold_ns FROM params) THEN 1 ELSE 0 END AS slow_flag,
+  CASE
+    WHEN ms.frame_dur_ns >= (SELECT slow_frame_threshold_ns FROM params) THEN 'severe_jank'
+    WHEN ms.frame_dur_ns >= (SELECT frame_threshold_ns FROM params) THEN 'slow_frame'
+    ELSE 'normal'
+  END AS jank_type,
+  CASE WHEN ms.is_main_thread = 1 THEN 'running_main' ELSE 'running_non_main' END AS main_thread_state,
+  CASE WHEN ms.frame_dur_ns >= (SELECT slow_frame_threshold_ns FROM params) THEN 'dur_exceeds_slow_threshold' ELSE '' END AS blocking_reason,
+  COALESCE(sc.top_slice_name, '') AS top_slice_name,
+  ms.process_name,
+  ms.pid,
+  ms.tid
+FROM main_sched ms
+LEFT JOIN trace_window tw
+LEFT JOIN slice_ctx sc ON ms.frame_start_ts = sc.frame_start_ts AND ms.frame_end_ts = sc.frame_end_ts
+ORDER BY ms.frame_dur_ns DESC, ms.frame_start_ts ASC
+LIMIT 5000;`,
+  },
+  {
     id: 'cpu-usage-analysis',
     name: 'CPU 占用分析',
     description: '分析进程/线程 CPU 热点及占比',
@@ -358,7 +447,10 @@ export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
     .replaceAll('{{thread}}', p.thread ?? '')
     .replaceAll('{{keyword}}', p.keyword ?? '')
     .replaceAll('{{pid}}', String(Math.max(0, Number(p.pid ?? 0))))
+    .replaceAll('{{tid}}', String(Math.max(0, Number(p.tid ?? 0))))
     .replaceAll('{{topN}}', String(Math.max(1, Number(p.topN ?? 10))))
+    .replaceAll('{{frameThresholdMs}}', String(Math.max(1, Number(p.frameThresholdMs ?? 16.6))))
+    .replaceAll('{{slowFrameThresholdMs}}', String(Math.max(1, Number(p.slowFrameThresholdMs ?? 33))))
     .replaceAll('{{onlyMainThread}}', String(Math.max(0, Math.min(1, Number(p.onlyMainThread ?? 0)))))
     .replaceAll('{{statLevel}}', p.statLevel === 'process' ? 'process' : 'thread')
     .replaceAll('{{aggregateOrderBy}}', aggregateOrderBy)
@@ -397,6 +489,19 @@ function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): 
       { label: 'Top1', value: String(top?.name ?? '-') },
       { label: '热点线程数', value: threadHotCount },
       { label: 'Top10 占比', value: `${(top10Ratio * 100).toFixed(2)}%` },
+    ];
+  }
+  if (plugin.id === 'main-thread-jank-analysis') {
+    const total = rows.length;
+    const slowRows = rows.filter((r) => Number(r.slow_flag ?? 0) === 1);
+    const maxDur = rows.reduce((acc, r) => Math.max(acc, Number(r.frame_dur_ms ?? 0)), 0);
+    const avgDur = total ? rows.reduce((acc, r) => acc + Number(r.frame_dur_ms ?? 0), 0) / total : 0;
+    return [
+      { label: '总帧数', value: total },
+      { label: '慢帧数', value: slowRows.length },
+      { label: '慢帧占比', value: total ? `${((slowRows.length / total) * 100).toFixed(2)}%` : '0%' },
+      { label: '最大帧耗时(ms)', value: Number(maxDur.toFixed(3)) },
+      { label: '平均帧耗时(ms)', value: Number(avgDur.toFixed(3)) },
     ];
   }
   return undefined;

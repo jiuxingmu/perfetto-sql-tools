@@ -74,12 +74,14 @@ export function buildPluginSpecificParamFields({
   isThreadTrend,
   isThreadBlocked,
   isCpuUsageAnalysis,
+  isMainThreadJankAnalysis,
   setActiveParams,
 }: Pick<SharedArgs, 'activeParams' | 'setActiveParams'> & {
   isEventAggregate: boolean;
   isThreadTrend: boolean;
   isThreadBlocked: boolean;
   isCpuUsageAnalysis: boolean;
+  isMainThreadJankAnalysis: boolean;
 }): ParamFieldDraft[] {
   return [
     {
@@ -183,6 +185,79 @@ export function buildPluginSpecificParamFields({
         <div className="param-switch-wrap">
           <Switch
             checked={(activeParams.onlyMainThread ?? 0) === 1}
+            onChange={(checked) => setActiveParams((p) => ({ ...p, onlyMainThread: checked ? 1 : 0 }))}
+          />
+        </div>
+      ),
+    },
+    {
+      key: 'jankThreadName',
+      label: '线程名(可选)',
+      visible: isMainThreadJankAnalysis,
+      control: (
+        <Input
+          placeholder="线程名模糊匹配"
+          value={activeParams.thread}
+          onChange={(e) => setActiveParams((p) => ({ ...p, thread: e.target.value }))}
+        />
+      ),
+    },
+    {
+      key: 'jankTid',
+      label: 'TID(可选)',
+      visible: isMainThreadJankAnalysis,
+      control: (
+        <Input
+          type="number"
+          placeholder="不填表示全部"
+          value={activeParams.tid}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, tid: Number.isFinite(value) ? value : undefined }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'jankFrameThreshold',
+      label: '帧阈值(ms)',
+      visible: isMainThreadJankAnalysis,
+      control: (
+        <Input
+          type="number"
+          min={1}
+          value={activeParams.frameThresholdMs ?? 16.6}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, frameThresholdMs: Number.isFinite(value) ? value : 16.6 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'jankSlowFrameThreshold',
+      label: '慢帧阈值(ms)',
+      visible: isMainThreadJankAnalysis,
+      control: (
+        <Input
+          type="number"
+          min={1}
+          value={activeParams.slowFrameThresholdMs ?? 33}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, slowFrameThresholdMs: Number.isFinite(value) ? value : 33 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'jankOnlyMainThread',
+      label: '仅主线程',
+      visible: isMainThreadJankAnalysis,
+      control: (
+        <div className="param-switch-wrap">
+          <Switch
+            checked={(activeParams.onlyMainThread ?? 1) === 1}
             onChange={(checked) => setActiveParams((p) => ({ ...p, onlyMainThread: checked ? 1 : 0 }))}
           />
         </div>

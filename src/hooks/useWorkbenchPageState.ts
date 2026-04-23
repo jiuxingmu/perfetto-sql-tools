@@ -41,6 +41,7 @@ export function useWorkbenchPageState() {
     isThreadTrend: activePlugin.id === 'thread-trend',
     isThreadBlocked: activePlugin.id === 'thread-blocked',
     isCpuUsageAnalysis: activePlugin.id === 'cpu-usage-analysis',
+    isMainThreadJankAnalysis: activePlugin.id === 'main-thread-jank-analysis',
     traceDurationSec,
     setActiveParams,
   });

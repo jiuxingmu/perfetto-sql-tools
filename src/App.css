@@ -223,3 +223,7 @@
 .cpu-selected-row > td {
   background: #e6f4ff !important;
 }
+
+.jank-selected-row > td {
+  background: #fff7e6 !important;
+}

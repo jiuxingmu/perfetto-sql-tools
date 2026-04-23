@@ -19,7 +19,8 @@ export type PluginId =
   | 'process-list'
   | 'thread-detail'
   | 'thread-blocked'
-  | 'cpu-usage-analysis';
+  | 'cpu-usage-analysis'
+  | 'main-thread-jank-analysis';
 
 export type QueryParams = {
   startSec: number;
@@ -27,10 +28,13 @@ export type QueryParams = {
   process?: string;
   pid?: number;
   thread?: string;
+  tid?: number;
   keyword?: string;
   bucketMs?: number;
   topN?: number;
   onlyMainThread?: number;
+  frameThresholdMs?: number;
+  slowFrameThresholdMs?: number;
   statLevel?: 'process' | 'thread';
   suspiciousOnly?: number;
   aggregateOrder?: 'avg_desc' | 'total_desc' | 'count_desc';

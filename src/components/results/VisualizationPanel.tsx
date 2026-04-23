@@ -3,6 +3,7 @@ import ReactECharts from 'echarts-for-react';
 import type { PluginDefinition, QueryResult } from '../../types';
 import type { TableRowHoverHandler } from '../workbench/WorkbenchTypes';
 import { CpuResultPanel } from '../cpu';
+import { JankResultPanel } from '../jank';
 
 type VisualizationPanelProps = {
   activePluginId: PluginDefinition['id'];
@@ -28,6 +29,9 @@ export function VisualizationPanel({
   }
   if (activePluginId === 'cpu-usage-analysis') {
     return <CpuResultPanel activeResult={activeResult} />;
+  }
+  if (activePluginId === 'main-thread-jank-analysis') {
+    return <JankResultPanel activeResult={activeResult} />;
   }
 
   return (
