@@ -14,7 +14,7 @@ import {
 import type { PluginDefinition, QueryParams, QueryResult, TraceDataset } from './types';
 
 const { Header, Sider, Content, Footer } = Layout;
-const STABLE_PLUGIN_IDS: PluginDefinition['id'][] = ['process-list', 'thread-detail'];
+const STABLE_PLUGIN_IDS: PluginDefinition['id'][] = ['process-list', 'thread-detail', 'thread-trend'];
 
 /** 结果表列宽：总和用于 `scroll.x`，避免列多时被压到只看见前几列。 */
 function getResultColumnWidth(key: string): number {
@@ -431,6 +431,7 @@ ORDER BY 1 ASC, 3 ASC;`;
       grid: { left: 32, right: 24, top: 20, bottom: 32 },
     };
   }, [activeResult, activePlugin.id, traceStartSec]);
+
 
   const rawRowsJson = useMemo(() => {
     const rows = activeResult?.rows ?? [];

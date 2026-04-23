@@ -13,7 +13,7 @@ export type TraceDataset = {
   threads: string[];
 };
 
-export type PluginId = 'slice-list' | 'thread-trend' | 'event-aggregate' | 'thread-state' | 'process-list' | 'thread-detail';
+export type PluginId = 'slice-list' | 'thread-trend' | 'event-aggregate' | 'thread-state' | 'process-list' | 'thread-detail' | 'thread-blocked';
 
 export type QueryParams = {
   startSec: number;

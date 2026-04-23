@@ -196,6 +196,71 @@ WHERE COALESCE(t.start_ts, 0) <= ts.end_ns
 ORDER BY t.upid ASC, t.tid ASC
 LIMIT 5000;`,
   },
+  {
+    id: 'thread-blocked',
+    name: '主线程阻塞分析',
+    description: '分析目标进程主线程在时间范围内被阻塞的情况',
+    outputType: 'table',
+    sqlTemplate: `WITH params AS (
+  SELECT
+    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
+    CAST({{endSec}} * 1e9 AS INT) AS end_ns
+),
+blocked AS (
+  SELECT
+    ts.utid,
+    ts.state,
+    ts.ts AS blocked_start_ns,
+    COALESCE(ts.dur, 0) AS dur,
+    ts.ts + COALESCE(ts.dur, 0) AS blocked_end_ns,
+    ts.waker_utid,
+    COALESCE(ts.io_wait, 0) AS io_wait,
+    COALESCE(ts.blocked_function, '') AS blocked_function
+  FROM thread_state ts
+  JOIN params x
+  WHERE ts.ts <= x.end_ns
+    AND (ts.ts + COALESCE(ts.dur, 0)) >= x.start_ns
+    AND COALESCE(ts.dur, 0) > 0
+    AND COALESCE(ts.state, '') NOT IN ('Running', 'Runnable', 'R')
+)
+SELECT
+  COALESCE(p.name, printf('pid_%d', p.pid)) AS process,
+  COALESCE(t.name, printf('tid_%d', t.tid)) AS thread,
+  t.tid AS blocked_tid,
+  b.utid AS blocked_utid,
+  b.state AS blocked_state,
+  CASE
+    WHEN b.state LIKE 'R%' THEN 'cpu_runnable_wait'
+    WHEN b.io_wait = 1 THEN 'io_wait'
+    WHEN b.blocked_function != '' THEN 'kernel_block'
+    WHEN b.state = 'S' THEN 'sleep_wait'
+    ELSE 'state_wait'
+  END AS blocked_reason,
+  CASE
+    WHEN b.state LIKE 'R%' THEN 1
+    WHEN b.io_wait = 1 THEN 1
+    WHEN b.blocked_function != '' THEN 1
+    WHEN b.state LIKE 'D%' THEN 1
+    ELSE 0
+  END AS suspicious_block_flag,
+  ROUND(b.blocked_start_ns / 1e9, 6) AS blocked_start_ts_sec,
+  ROUND(b.blocked_end_ns / 1e9, 6) AS blocked_end_ts_sec,
+  ROUND(b.dur / 1e6, 3) AS blocked_dur_ms,
+  b.io_wait AS io_wait_flag,
+  b.blocked_function,
+  wt.tid AS waker_tid,
+  COALESCE(wt.name, '') AS waker_thread,
+  COALESCE(wp.name, '') AS waker_process
+FROM blocked b
+JOIN thread t ON b.utid = t.utid
+LEFT JOIN process p ON t.upid = p.upid
+LEFT JOIN thread wt ON b.waker_utid = wt.utid
+LEFT JOIN process wp ON wt.upid = wp.upid
+WHERE COALESCE(p.name, '') LIKE '%{{process}}%'
+  AND COALESCE(t.is_main_thread, 0) = 1
+ORDER BY b.blocked_start_ns ASC
+LIMIT 5000;`,
+  },
 ];
 
 export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
