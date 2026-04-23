@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Card, Col, Descriptions, Empty, Input, Layout, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, Upload, Button, message } from 'antd';
+import { Card, Col, Empty, Input, Layout, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, Upload, Button, message } from 'antd';
 import type { UploadProps } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { PLUGINS, runPluginQuery } from './lib/plugins';
@@ -255,8 +255,8 @@ function App() {
       ? (() => {
           const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
           const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
-          const panelW = 400;
-          const panelH = 300;
+          const panelW = Math.min(560, vw - 24);
+          const panelH = 360;
           const left = Math.max(8, Math.min(processListHover.x, vw - panelW - 8));
           const top = Math.max(8, Math.min(processListHover.y, vh - panelH - 8));
           const extraRows = Object.entries(processListHover.record)
@@ -282,18 +282,40 @@ function App() {
             >
               <Card size="small" title="More fields" styles={{ body: { padding: 12 } }}>
                 {extraRows.length ? (
-                  <Descriptions column={1} size="small" styles={{ label: { width: 140 } }}>
-                    {extraRows.map(([k, v]) => (
-                      <Descriptions.Item key={k} label={k}>
-                        <Typography.Text
-                          style={{ wordBreak: 'break-word' }}
-                          copyable={typeof v === 'string' && String(v).length > 80 ? { text: String(v) } : false}
+                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                    {extraRows.map(([k, v]) => {
+                      const display = formatProcessListDetailValue(k, v, traceStartSec);
+                      const longRaw = typeof v === 'string' && String(v).length > 80;
+                      return (
+                        <div
+                          key={k}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 10,
+                            minWidth: 0,
+                            width: '100%',
+                          }}
                         >
-                          {formatProcessListDetailValue(k, v, traceStartSec)}
-                        </Typography.Text>
-                      </Descriptions.Item>
-                    ))}
-                  </Descriptions>
+                          <Typography.Text
+                            strong
+                            ellipsis={{ tooltip: k }}
+                            style={{ width: 200, flexShrink: 0, margin: 0 }}
+                          >
+                            {k}
+                          </Typography.Text>
+                          <Typography.Text
+                            ellipsis={{ tooltip: display }}
+                            copyable={longRaw ? { text: String(v) } : false}
+                            style={{ flex: 1, minWidth: 0, margin: 0 }}
+                          >
+                            {display}
+                          </Typography.Text>
+                        </div>
+                      );
+                    })}
+                  </Space>
                 ) : (
                   <Typography.Text type="secondary">No more fields</Typography.Text>
                 )}
