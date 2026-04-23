@@ -1,4 +1,4 @@
-import type { PluginDefinition, QueryResult } from '../types';
+import type { PluginDefinition, QueryResult } from '../../types';
 import type { ReactNode } from 'react';
 
 export type TableRowHoverHandler =

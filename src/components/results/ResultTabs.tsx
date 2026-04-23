@@ -1,6 +1,7 @@
 import { Tabs } from 'antd';
 import type { PluginDefinition, QueryResult } from '../../types';
-import type { TableRowHoverHandler } from '../workbenchTypes';
+import type { TableRowHoverHandler } from '../workbench/WorkbenchTypes';
+import { RawCodePanel } from './RawCodePanel';
 import { VisualizationPanel } from './VisualizationPanel';
 
 type ResultTabsProps = {
@@ -45,18 +46,14 @@ export function ResultTabs({
         key: 'sql',
         label: 'SQL 预览',
         children: (
-          <pre style={{ margin: 0, background: '#0b1020', color: '#e2e8f0', padding: 12, borderRadius: 8, overflowX: 'auto' }}>
-            {activeResult?.sqlPreview ?? '--'}
-          </pre>
+          <RawCodePanel dark value={activeResult?.sqlPreview ?? '--'} />
         ),
       },
       {
         key: 'raw',
         label: '原始数据',
         children: (
-          <pre style={{ margin: 0, background: '#f6f8fa', padding: 12, borderRadius: 8, maxHeight: 320, overflow: 'auto' }}>
-            {rawRowsJson}
-          </pre>
+          <RawCodePanel value={rawRowsJson} />
         ),
       },
     ]} />

@@ -1,5 +1,5 @@
 import { Col, Empty, Row, Statistic } from 'antd';
-import type { TraceDataset } from '../types';
+import type { TraceDataset } from '../../types';
 
 type TraceOverviewProps = {
   dataset: TraceDataset | null;

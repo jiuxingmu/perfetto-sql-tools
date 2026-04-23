@@ -1,0 +1,99 @@
+import { useMemo, useState } from 'react';
+import { useParamFields } from './useParamFields';
+import { usePluginWorkspace } from './usePluginWorkspace';
+import { useProcessListHover } from './useProcessListHover';
+import { useResultViewModel } from './useResultViewModel';
+import { useRunPluginQuery } from './useRunPluginQuery';
+import { useTraceImport } from './useTraceImport';
+import { useTrendDiff } from './useTrendDiff';
+import { createParamsByPlugin } from '../lib/pluginState';
+import type { TraceDataset } from '../types';
+
+export function useWorkbenchPageState() {
+  const [dataset, setDataset] = useState<TraceDataset | null>(null);
+  const [globalProcess, setGlobalProcess] = useState('');
+
+  const traceStartSec = dataset?.summary.timeRange[0] ?? 0;
+  const traceEndSec = dataset?.summary.timeRange[1] ?? 0;
+  const traceDurationSec = Math.max(0, traceEndSec - traceStartSec);
+
+  const workspace = usePluginWorkspace({ traceDurationSec });
+  const {
+    activePluginId,
+    activePlugin,
+    activeParams,
+    setActiveParams,
+    setResultByPlugin,
+    setParamsByPlugin,
+    activeResult,
+  } = workspace;
+
+  const processOptions = useMemo(() => {
+    if (!dataset) return [];
+    return dataset.processes.map((processName) => ({ label: processName, value: processName }));
+  }, [dataset]);
+
+  const paramFields = useParamFields({
+    activeParams,
+    processOptions,
+    globalProcess,
+    isEventAggregate: activePlugin.id === 'event-aggregate',
+    isThreadTrend: activePlugin.id === 'thread-trend',
+    isThreadBlocked: activePlugin.id === 'thread-blocked',
+    traceDurationSec,
+    setActiveParams,
+  });
+
+  const traceImport = useTraceImport({
+    createParamsByPlugin,
+    setDataset,
+    setGlobalProcess,
+    setResultByPlugin,
+    setParamsByPlugin,
+  });
+
+  const runState = useRunPluginQuery({
+    dataset,
+    activePlugin,
+    activePluginId,
+    activeParams,
+    globalProcess,
+    traceStartSec,
+    setResultByPlugin,
+  });
+
+  const trendDiff = useTrendDiff({
+    activePlugin,
+    activeResult,
+    traceStartSec,
+    globalProcess,
+    activeParams,
+  });
+
+  const resultView = useResultViewModel({
+    activePlugin,
+    activePluginId,
+    activeParams,
+    activeResult,
+    globalProcess,
+    traceStartSec,
+  });
+
+  const hoverState = useProcessListHover({ activePluginId });
+
+  return {
+    dataset,
+    globalProcess,
+    setGlobalProcess,
+    traceStartSec,
+    traceDurationSec,
+    processOptions,
+    workspace,
+    paramFields,
+    traceImport,
+    runState,
+    trendDiff,
+    resultView,
+    hoverState,
+  };
+}

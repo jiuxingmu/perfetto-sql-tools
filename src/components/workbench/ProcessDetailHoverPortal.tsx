@@ -1,13 +1,13 @@
 import { Card, Space, Typography } from 'antd';
 import { createPortal } from 'react-dom';
-import type { PluginDefinition } from '../types';
+import type { PluginDefinition } from '../../types';
 import {
   formatDetailValue,
   PROCESS_LIST_EXTRA_KEY_ORDER,
   PROCESS_LIST_TABLE_KEYS,
   THREAD_DETAIL_EXTRA_KEY_ORDER,
   THREAD_DETAIL_TABLE_KEYS,
-} from '../lib/resultPresentation';
+} from '../../lib/resultPresentation';
 
 type HoverState = {
   record: Record<string, unknown>;

@@ -1,5 +1,5 @@
 import { Card, Layout, Space, Tag, Typography } from 'antd';
-import type { PluginDefinition } from '../types';
+import type { PluginDefinition } from '../../types';
 
 const { Sider } = Layout;
 

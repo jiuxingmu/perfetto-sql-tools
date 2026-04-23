@@ -1,6 +1,6 @@
 import { Layout } from 'antd';
 import './App.css';
-import { PluginWorkbench } from './components/PluginWorkbench';
+import { PluginWorkbench } from './components/workbench';
 
 const { Footer } = Layout;
 

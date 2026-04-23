@@ -1,7 +1,7 @@
 import { Table } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import type { PluginDefinition, QueryResult } from '../../types';
-import type { TableRowHoverHandler } from '../workbenchTypes';
+import type { TableRowHoverHandler } from '../workbench/WorkbenchTypes';
 
 type VisualizationPanelProps = {
   activePluginId: PluginDefinition['id'];
