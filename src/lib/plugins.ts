@@ -161,6 +161,41 @@ WHERE COALESCE(p.name, '') LIKE '%{{process}}%'
 ORDER BY active_in_window_sec DESC, p.upid ASC
 LIMIT 5000;`,
   },
+  {
+    id: 'thread-detail',
+    name: '线程列表',
+    description: '列举时间范围内匹配的线程信息',
+    outputType: 'table',
+    sqlTemplate: `WITH params AS (
+  SELECT
+    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
+    CAST({{endSec}} * 1e9 AS INT) AS end_ns
+)
+SELECT
+  t.tid,
+  COALESCE(t.name, printf('tid_%d', t.tid)) AS name,
+  t.upid,
+  COALESCE(p.name, printf('pid_%d', p.pid)) AS process,
+  COALESCE(t.is_main_thread, 0) AS is_main_thread,
+  t.start_ts AS start_ts,
+  t.end_ts AS end_ts,
+  t.utid,
+  p.pid AS process_pid,
+  p.uid AS process_uid,
+  COALESCE(p.cmdline, '') AS process_cmdline,
+  p.parent_upid AS process_parent_upid,
+  p.android_appid AS process_android_appid,
+  p.arg_set_id AS process_arg_set_id
+FROM thread t
+JOIN params ts
+LEFT JOIN process p ON t.upid = p.upid
+WHERE COALESCE(t.start_ts, 0) <= ts.end_ns
+  AND COALESCE(t.end_ts, ts.end_ns) >= ts.start_ns
+  AND COALESCE(p.name, '') LIKE '%{{process}}%'
+  AND COALESCE(t.name, '') LIKE '%{{thread}}%'
+ORDER BY t.upid ASC, t.tid ASC
+LIMIT 5000;`,
+  },
 ];
 
 export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {

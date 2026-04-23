@@ -29,6 +29,7 @@ function getResultColumnWidth(key: string): number {
 
 /** 进程列表：主表仅展示这些列，其余在悬停浮层中展示。 */
 const PROCESS_LIST_TABLE_KEYS = ['pid', 'name', 'process', 'uid', 'status', 'window_start_sec', 'window_end_sec'] as const;
+const THREAD_DETAIL_TABLE_KEYS = ['tid', 'name', 'upid', 'process', 'is_main_thread', 'start_ts', 'end_ts'] as const;
 
 const PROCESS_LIST_EXTRA_KEY_ORDER = [
   'upid',
@@ -40,11 +41,15 @@ const PROCESS_LIST_EXTRA_KEY_ORDER = [
   'start_ts_sec',
   'end_ts_sec',
 ];
-
-function processListExtraRank(key: string): number {
-  const i = PROCESS_LIST_EXTRA_KEY_ORDER.indexOf(key);
-  return i === -1 ? 1000 + key.charCodeAt(0) : i;
-}
+const THREAD_DETAIL_EXTRA_KEY_ORDER = [
+  'utid',
+  'process_pid',
+  'process_uid',
+  'process_cmdline',
+  'process_parent_upid',
+  'process_android_appid',
+  'process_arg_set_id',
+];
 
 function getProcessListColumnWidth(key: string): number {
   if (key === 'name' || key === 'process') return 160;
@@ -54,11 +59,23 @@ function getProcessListColumnWidth(key: string): number {
   return 100;
 }
 
-function formatProcessListDetailValue(key: string, value: unknown, traceStartSec: number): string {
+function getThreadDetailColumnWidth(key: string): number {
+  if (key === 'name' || key === 'process') return 170;
+  if (key === 'start_ts' || key === 'end_ts') return 120;
+  if (key === 'is_main_thread') return 110;
+  if (key === 'tid' || key === 'upid') return 88;
+  return 100;
+}
+
+function formatDetailValue(key: string, value: unknown, traceStartSec: number): string {
   if (value === null || value === undefined || value === '') return '—';
   if (key === 'active_in_window_sec') {
     const n = typeof value === 'number' ? value : Number(value);
     return Number.isFinite(n) ? `${n.toFixed(3)} s` : String(value);
+  }
+  if (key === 'is_main_thread') {
+    const n = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(n) ? (n ? '1 (main)' : '0') : String(value);
   }
   if (isAbsoluteTraceTimeColumn(key)) {
     return `${toRelativeTraceSecDisplay(value, traceStartSec, relativeTraceSecFractionDigits(key))} s`;
@@ -66,18 +83,42 @@ function formatProcessListDetailValue(key: string, value: unknown, traceStartSec
   return String(value);
 }
 
+function formatThreadRelativeSecFromNs(value: unknown, traceStartSec: number): string {
+  if (value === null || value === undefined || value === '') return '';
+  const ns = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(ns)) return String(value);
+  return roundRelativeSec(ns / 1e9 - traceStartSec, 3).toFixed(3);
+}
+
+function createDefaultParams(defaultEndSec: number): QueryParams {
+  return {
+    startSec: 0,
+    endSec: defaultEndSec,
+    bucketMs: 1000,
+    process: '',
+    thread: '',
+    keyword: '',
+  };
+}
+
 function App() {
   const [dataset, setDataset] = useState<TraceDataset | null>(null);
   const [loading, setLoading] = useState(false);
   const [activePluginId, setActivePluginId] = useState<PluginDefinition['id']>('slice-list');
-  const [params, setParams] = useState<QueryParams>({ startSec: 0, endSec: 10, bucketMs: 1000, process: '', thread: '', keyword: '' });
-  const [result, setResult] = useState<QueryResult | null>(null);
+  const [paramsByPlugin, setParamsByPlugin] = useState<Record<PluginDefinition['id'], QueryParams>>(() =>
+    Object.fromEntries(
+      PLUGINS.map((p) => [p.id, createDefaultParams(10)]),
+    ) as Record<PluginDefinition['id'], QueryParams>,
+  );
+  const [resultByPlugin, setResultByPlugin] = useState<Partial<Record<PluginDefinition['id'], QueryResult>>>({});
   const [running, setRunning] = useState(false);
   const traceStartSec = dataset?.summary.timeRange[0] ?? 0;
   const traceEndSec = dataset?.summary.timeRange[1] ?? 0;
   const traceDurationSec = Math.max(0, traceEndSec - traceStartSec);
 
   const activePlugin = useMemo(() => PLUGINS.find((p) => p.id === activePluginId)!, [activePluginId]);
+  const activeParams = paramsByPlugin[activePluginId] ?? createDefaultParams(10);
+  const activeResult = resultByPlugin[activePluginId] ?? null;
   const showThreadFilter = activePlugin.id !== 'process-list';
 
   const [processListHover, setProcessListHover] = useState<{
@@ -105,7 +146,7 @@ function App() {
   useEffect(() => {
     cancelProcessListHide();
     setProcessListHover(null);
-  }, [activePluginId, result]);
+  }, [activePluginId, activeResult]);
 
   useEffect(() => () => cancelProcessListHide(), []);
 
@@ -133,14 +174,13 @@ function App() {
         }
         const parsed = (await resp.json()) as TraceDataset;
         setDataset(parsed);
-        setResult(null);
-        setParams((p) => ({
-          ...p,
-          startSec: 0,
-          endSec: Number((parsed.summary.timeRange[1] - parsed.summary.timeRange[0]).toFixed(3)),
-          process: '',
-          thread: '',
-        }));
+        const relativeEndSec = Number((parsed.summary.timeRange[1] - parsed.summary.timeRange[0]).toFixed(3));
+        setResultByPlugin({});
+        setParamsByPlugin(
+          Object.fromEntries(
+            PLUGINS.map((p) => [p.id, createDefaultParams(relativeEndSec)]),
+          ) as Record<PluginDefinition['id'], QueryParams>,
+        );
         message.success(`已导入 trace: ${file.name}`);
       } catch (err) {
         const text = err instanceof Error ? err.message : String(err);
@@ -155,6 +195,13 @@ function App() {
     },
   };
 
+  const setActiveParams = (updater: (p: QueryParams) => QueryParams) => {
+    setParamsByPlugin((prev) => ({
+      ...prev,
+      [activePluginId]: updater(prev[activePluginId] ?? createDefaultParams(traceDurationSec || 10)),
+    }));
+  };
+
   const onRun = async () => {
     if (!dataset) {
       message.warning('请先导入 trace 文件');
@@ -163,12 +210,12 @@ function App() {
     setRunning(true);
     try {
       const absParams: QueryParams = {
-        ...params,
-        startSec: params.startSec + traceStartSec,
-        endSec: params.endSec + traceStartSec,
+        ...activeParams,
+        startSec: activeParams.startSec + traceStartSec,
+        endSec: activeParams.endSec + traceStartSec,
       };
       const r = await runPluginQuery(activePlugin, absParams);
-      setResult(r);
+      setResultByPlugin((prev) => ({ ...prev, [activePluginId]: r }));
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);
       const hint = text.includes('Failed to fetch') || text.includes('ECONNREFUSED')
@@ -181,8 +228,8 @@ function App() {
   };
 
   const { tableColumns, tableScrollX } = useMemo(() => {
-    if (!result?.rows?.length) return { tableColumns: [], tableScrollX: 0 };
-    const row0 = result.rows[0] as Record<string, unknown>;
+    if (!activeResult?.rows?.length) return { tableColumns: [], tableScrollX: 0 };
+    const row0 = activeResult.rows[0] as Record<string, unknown>;
 
     if (activePluginId === 'process-list') {
       const keys = (PROCESS_LIST_TABLE_KEYS as readonly string[]).filter((k) =>
@@ -198,6 +245,30 @@ function App() {
         render: isAbsoluteTraceTimeColumn(k)
           ? (v: unknown) => toRelativeTraceSecDisplay(v, traceStartSec, relativeTraceSecFractionDigits(k))
           : undefined,
+      }));
+      return { tableColumns: cols, tableScrollX: scrollX };
+    }
+    if (activePluginId === 'thread-detail') {
+      const keys = (THREAD_DETAIL_TABLE_KEYS as readonly string[]).filter((k) =>
+        Object.prototype.hasOwnProperty.call(row0, k),
+      );
+      const scrollX = Math.max(640, keys.reduce((acc, k) => acc + getThreadDetailColumnWidth(k), 0));
+      const cols = keys.map((k) => ({
+        title: k,
+        dataIndex: k,
+        key: k,
+        width: getThreadDetailColumnWidth(k),
+        ellipsis: true as const,
+        render: (k === 'start_ts' || k === 'end_ts')
+          ? (v: unknown) => formatThreadRelativeSecFromNs(v, traceStartSec)
+          : isAbsoluteTraceTimeColumn(k)
+            ? (v: unknown) => toRelativeTraceSecDisplay(v, traceStartSec, relativeTraceSecFractionDigits(k))
+          : k === 'is_main_thread'
+            ? (v: unknown) => {
+                const n = typeof v === 'number' ? v : Number(v);
+                return Number.isFinite(n) ? (n ? '1 (main)' : '0') : String(v ?? '');
+              }
+            : undefined,
       }));
       return { tableColumns: cols, tableScrollX: scrollX };
     }
@@ -221,7 +292,7 @@ function App() {
             : undefined,
     }));
     return { tableColumns: cols, tableScrollX: scrollX };
-  }, [result, traceStartSec, activePluginId]);
+  }, [activeResult, traceStartSec, activePluginId]);
 
   const tableRowKey = (record: Record<string, unknown>, index?: number) => {
     const i = index ?? 0;
@@ -230,28 +301,28 @@ function App() {
   };
 
   const lineOption = useMemo(() => {
-    if (!result?.rows?.length || activePlugin.id !== 'thread-trend') return null;
+    if (!activeResult?.rows?.length || activePlugin.id !== 'thread-trend') return null;
     return {
       tooltip: { trigger: 'axis' },
       xAxis: {
         type: 'category',
         name: 'Relative time (s)',
-        data: result.rows.map((r) => roundRelativeSec(Number(r.bucket_ts_sec) - traceStartSec, 3).toFixed(3)),
+        data: activeResult.rows.map((r) => roundRelativeSec(Number(r.bucket_ts_sec) - traceStartSec, 3).toFixed(3)),
       },
       yAxis: { type: 'value' },
-      series: [{ type: 'line', smooth: true, data: result.rows.map((r) => Number(r.thread_count ?? 0)) }],
+      series: [{ type: 'line', smooth: true, data: activeResult.rows.map((r) => Number(r.thread_count ?? 0)) }],
       grid: { left: 32, right: 24, top: 20, bottom: 32 },
     };
-  }, [result, activePlugin.id, traceStartSec]);
+  }, [activeResult, activePlugin.id, traceStartSec]);
 
   const rawRowsJson = useMemo(() => {
-    const rows = result?.rows ?? [];
+    const rows = activeResult?.rows ?? [];
     if (!rows.length) return '[]';
     return JSON.stringify(mapRowsToRelativeTraceTimes(rows, traceStartSec), null, 2);
-  }, [result?.rows, traceStartSec]);
+  }, [activeResult?.rows, traceStartSec]);
 
   const processListHoverPortal =
-    processListHover && activePlugin.id === 'process-list'
+    processListHover && (activePlugin.id === 'process-list' || activePlugin.id === 'thread-detail')
       ? (() => {
           const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
           const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
@@ -259,9 +330,21 @@ function App() {
           const panelH = 360;
           const left = Math.max(8, Math.min(processListHover.x, vw - panelW - 8));
           const top = Math.max(8, Math.min(processListHover.y, vh - panelH - 8));
+          const mainTableKeys = activePlugin.id === 'process-list'
+            ? (PROCESS_LIST_TABLE_KEYS as readonly string[])
+            : (THREAD_DETAIL_TABLE_KEYS as readonly string[]);
+          const extraOrder = activePlugin.id === 'process-list'
+            ? PROCESS_LIST_EXTRA_KEY_ORDER
+            : THREAD_DETAIL_EXTRA_KEY_ORDER;
           const extraRows = Object.entries(processListHover.record)
-            .filter(([k]) => !(PROCESS_LIST_TABLE_KEYS as readonly string[]).includes(k))
-            .sort((a, b) => processListExtraRank(a[0]) - processListExtraRank(b[0]) || a[0].localeCompare(b[0]));
+            .filter(([k]) => !mainTableKeys.includes(k))
+            .sort((a, b) => {
+              const ia = extraOrder.indexOf(a[0]);
+              const ib = extraOrder.indexOf(b[0]);
+              const ra = ia === -1 ? 1000 + a[0].charCodeAt(0) : ia;
+              const rb = ib === -1 ? 1000 + b[0].charCodeAt(0) : ib;
+              return ra - rb || a[0].localeCompare(b[0]);
+            });
           return createPortal(
             <div
               role="tooltip"
@@ -284,7 +367,7 @@ function App() {
                 {extraRows.length ? (
                   <Space direction="vertical" size={6} style={{ width: '100%' }}>
                     {extraRows.map(([k, v]) => {
-                      const display = formatProcessListDetailValue(k, v, traceStartSec);
+                      const display = formatDetailValue(k, v, traceStartSec);
                       const longRaw = typeof v === 'string' && String(v).length > 80;
                       return (
                         <div
@@ -327,7 +410,7 @@ function App() {
       : null;
 
   const processListTableOnRow =
-    activePlugin.id === 'process-list'
+    (activePlugin.id === 'process-list' || activePlugin.id === 'thread-detail')
       ? (record: Record<string, unknown>) => ({
           onMouseEnter: (e: { clientX: number; clientY: number }) => {
             cancelProcessListHide();
@@ -381,16 +464,16 @@ function App() {
                   <Input
                     type="number"
                     addonBefore="开始(s)"
-                    value={params.startSec}
-                    onChange={(e) => setParams((p) => ({ ...p, startSec: Number(e.target.value) }))}
+                    value={activeParams.startSec}
+                    onChange={(e) => setActiveParams((p) => ({ ...p, startSec: Number(e.target.value) }))}
                   />
                 </Col>
                 <Col span={4}>
                   <Input
                     type="number"
                     addonBefore="结束(s)"
-                    value={params.endSec}
-                    onChange={(e) => setParams((p) => ({ ...p, endSec: Number(e.target.value) }))}
+                    value={activeParams.endSec}
+                    onChange={(e) => setActiveParams((p) => ({ ...p, endSec: Number(e.target.value) }))}
                     max={traceDurationSec || undefined}
                   />
                 </Col>
@@ -402,8 +485,8 @@ function App() {
                     placeholder="进程"
                     style={{ width: '100%' }}
                     options={processOptions}
-                    value={params.process || undefined}
-                    onChange={(v) => setParams((p) => ({ ...p, process: v ?? '' }))}
+                    value={activeParams.process || undefined}
+                    onChange={(v) => setActiveParams((p) => ({ ...p, process: v ?? '' }))}
                   />
                 </Col>
                 {showThreadFilter ? (
@@ -415,17 +498,17 @@ function App() {
                       placeholder="线程"
                       style={{ width: '100%' }}
                       options={threadOptions}
-                      value={params.thread || undefined}
-                      onChange={(v) => setParams((p) => ({ ...p, thread: v ?? '' }))}
+                      value={activeParams.thread || undefined}
+                      onChange={(v) => setActiveParams((p) => ({ ...p, thread: v ?? '' }))}
                     />
                   </Col>
                 ) : null}
-                {activePlugin.id !== 'process-list' ? (
+                {activePlugin.id !== 'process-list' && activePlugin.id !== 'thread-detail' ? (
                   <Col span={4}>
                     <Input
                       placeholder="事件关键字"
-                      value={params.keyword}
-                      onChange={(e) => setParams((p) => ({ ...p, keyword: e.target.value }))}
+                      value={activeParams.keyword}
+                      onChange={(e) => setActiveParams((p) => ({ ...p, keyword: e.target.value }))}
                     />
                   </Col>
                 ) : null}
@@ -434,7 +517,7 @@ function App() {
               {activePlugin.id === 'thread-trend' && (
                 <Row style={{ marginTop: 12 }}>
                   <Col span={8}>
-                    <Input type="number" addonBefore="分桶(ms)" value={params.bucketMs} onChange={(e) => setParams((p) => ({ ...p, bucketMs: Number(e.target.value) }))} />
+                    <Input type="number" addonBefore="分桶(ms)" value={activeParams.bucketMs} onChange={(e) => setActiveParams((p) => ({ ...p, bucketMs: Number(e.target.value) }))} />
                   </Col>
                 </Row>
               )}
@@ -455,7 +538,7 @@ function App() {
                       tableLayout="fixed"
                       scroll={tableScrollX ? { x: tableScrollX } : undefined}
                       columns={tableColumns}
-                      dataSource={result?.rows ?? []}
+                      dataSource={activeResult?.rows ?? []}
                       pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: [20, 50, 100, 200] }}
                       onRow={processListTableOnRow}
                     />
@@ -464,7 +547,7 @@ function App() {
                 {
                   key: 'sql',
                   label: 'SQL 预览',
-                  children: <pre style={{ margin: 0, background: '#0b1020', color: '#e2e8f0', padding: 12, borderRadius: 8, overflowX: 'auto' }}>{result?.sqlPreview ?? '--'}</pre>,
+                  children: <pre style={{ margin: 0, background: '#0b1020', color: '#e2e8f0', padding: 12, borderRadius: 8, overflowX: 'auto' }}>{activeResult?.sqlPreview ?? '--'}</pre>,
                 },
                 {
                   key: 'raw',
@@ -472,9 +555,9 @@ function App() {
                   children: <pre style={{ margin: 0, background: '#f6f8fa', padding: 12, borderRadius: 8, maxHeight: 320, overflow: 'auto' }}>{rawRowsJson}</pre>,
                 },
               ]} />
-              {result?.stats?.length ? (
+              {activeResult?.stats?.length ? (
                 <Row gutter={12} style={{ marginTop: 12 }}>
-                  {result.stats.map((s) => <Col key={s.label} span={6}><Card size="small"><Statistic title={s.label} value={s.value} /></Card></Col>)}
+                  {activeResult.stats.map((s) => <Col key={s.label} span={6}><Card size="small"><Statistic title={s.label} value={s.value} /></Card></Col>)}
                 </Row>
               ) : null}
             </Card>
