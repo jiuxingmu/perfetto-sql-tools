@@ -13,7 +13,7 @@ export type TraceDataset = {
   threads: string[];
 };
 
-export type PluginId = 'slice-list' | 'thread-trend' | 'event-aggregate' | 'thread-state' | 'process-list' | 'thread-detail' | 'thread-blocked';
+export type PluginId = 'thread-trend' | 'event-aggregate' | 'process-list' | 'thread-detail' | 'thread-blocked';
 
 export type QueryParams = {
   startSec: number;
@@ -23,6 +23,7 @@ export type QueryParams = {
   keyword?: string;
   bucketMs?: number;
   suspiciousOnly?: number;
+  aggregateOrder?: 'avg_desc' | 'total_desc' | 'count_desc';
 };
 
 export type PluginDefinition = {

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Card, Col, Empty, Input, Layout, Modal, Row, Select, Space, Statistic, Switch, Table, Tabs, Tag, Typography, Upload, Button, message } from 'antd';
 import type { UploadProps } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { PLUGINS, runPluginQuery } from './lib/plugins';
+import './App.css';
 import {
   isAbsoluteTraceTimeColumn,
   mapRowsToRelativeTraceTimes,
@@ -14,7 +15,13 @@ import {
 import type { PluginDefinition, QueryParams, QueryResult, TraceDataset } from './types';
 
 const { Header, Sider, Content, Footer } = Layout;
-const STABLE_PLUGIN_IDS: PluginDefinition['id'][] = ['process-list', 'thread-detail', 'thread-trend'];
+const PLUGIN_DISPLAY_ORDER: PluginDefinition['id'][] = [
+  'process-list',
+  'thread-detail',
+  'thread-trend',
+  'thread-blocked',
+  'event-aggregate',
+];
 
 /** 结果表列宽：总和用于 `scroll.x`，避免列多时被压到只看见前几列。 */
 function getResultColumnWidth(key: string): number {
@@ -100,14 +107,24 @@ function createDefaultParams(defaultEndSec: number): QueryParams {
     thread: '',
     keyword: '',
     suspiciousOnly: 1,
+    aggregateOrder: 'avg_desc',
   };
+}
+
+function ParamField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="param-field">
+      <Typography.Text className="param-field-label">{label}</Typography.Text>
+      <div className="param-field-control">{children}</div>
+    </div>
+  );
 }
 
 function App() {
   const [dataset, setDataset] = useState<TraceDataset | null>(null);
   const [loading, setLoading] = useState(false);
   const [globalProcess, setGlobalProcess] = useState('');
-  const [activePluginId, setActivePluginId] = useState<PluginDefinition['id']>('slice-list');
+  const [activePluginId, setActivePluginId] = useState<PluginDefinition['id']>('process-list');
   const [paramsByPlugin, setParamsByPlugin] = useState<Record<PluginDefinition['id'], QueryParams>>(() =>
     Object.fromEntries(
       PLUGINS.map((p) => [p.id, createDefaultParams(10)]),
@@ -125,12 +142,139 @@ function App() {
   const traceDurationSec = Math.max(0, traceEndSec - traceStartSec);
 
   const activePlugin = useMemo(() => PLUGINS.find((p) => p.id === activePluginId)!, [activePluginId]);
-  const stablePlugins = useMemo(() => PLUGINS.filter((p) => STABLE_PLUGIN_IDS.includes(p.id)), []);
-  const devPlugins = useMemo(() => PLUGINS.filter((p) => !STABLE_PLUGIN_IDS.includes(p.id)), []);
+  const orderedPlugins = useMemo(() => {
+    const rank = new Map(PLUGIN_DISPLAY_ORDER.map((id, idx) => [id, idx]));
+    return [...PLUGINS].sort((a, b) => {
+      const ra = rank.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const rb = rank.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      if (ra !== rb) return ra - rb;
+      return a.name.localeCompare(b.name);
+    });
+  }, []);
   const isThreadTrend = activePlugin.id === 'thread-trend';
   const isThreadBlocked = activePlugin.id === 'thread-blocked';
+  const isEventAggregate = activePlugin.id === 'event-aggregate';
   const activeParams = paramsByPlugin[activePluginId] ?? createDefaultParams(10);
   const activeResult = resultByPlugin[activePluginId] ?? null;
+  const processOptions = useMemo(() => {
+    if (!dataset) return [];
+    return dataset.processes.map((p) => ({ label: p, value: p }));
+  }, [dataset]);
+  const paramFields = useMemo(
+    () => {
+      type ParamFieldConfig = {
+        key: string;
+        label: string;
+        visible: boolean;
+        control: ReactNode;
+      };
+
+      const fields: ParamFieldConfig[] = [
+        {
+          key: 'startSec',
+          label: '开始(s)',
+          visible: true,
+          control: (
+            <Input
+              type="number"
+              value={activeParams.startSec}
+              onChange={(e) => setActiveParams((p) => ({ ...p, startSec: Number(e.target.value) }))}
+            />
+          ),
+        },
+        {
+          key: 'endSec',
+          label: '结束(s)',
+          visible: true,
+          control: (
+            <Input
+              type="number"
+              value={activeParams.endSec}
+              onChange={(e) => setActiveParams((p) => ({ ...p, endSec: Number(e.target.value) }))}
+              max={traceDurationSec || undefined}
+            />
+          ),
+        },
+        {
+          key: 'process',
+          label: '进程',
+          visible: true,
+          control: (
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="全部进程"
+              style={{ width: '100%' }}
+              options={processOptions}
+              value={(globalProcess || activeParams.process) || undefined}
+              onChange={(v) => setActiveParams((p) => ({ ...p, process: v ?? '' }))}
+            />
+          ),
+        },
+        {
+          key: 'keyword',
+          label: '事件关键字',
+          visible: isEventAggregate,
+          control: (
+            <Input
+              placeholder="如: methodA"
+              value={activeParams.keyword}
+              onChange={(e) => setActiveParams((p) => ({ ...p, keyword: e.target.value }))}
+            />
+          ),
+        },
+        {
+          key: 'aggregateOrder',
+          label: '排序规则',
+          visible: isEventAggregate,
+          control: (
+            <Select
+              style={{ width: '100%' }}
+              value={activeParams.aggregateOrder ?? 'avg_desc'}
+              onChange={(v) => setActiveParams((p) => ({
+                ...p,
+                aggregateOrder: v as QueryParams['aggregateOrder'],
+              }))}
+              options={[
+                { label: '按平均耗时', value: 'avg_desc' },
+                { label: '按总耗时', value: 'total_desc' },
+                { label: '按调用次数', value: 'count_desc' },
+              ]}
+            />
+          ),
+        },
+        {
+          key: 'bucketMs',
+          label: '分桶(ms)',
+          visible: isThreadTrend,
+          control: (
+            <Input
+              type="number"
+              value={activeParams.bucketMs}
+              onChange={(e) => setActiveParams((p) => ({ ...p, bucketMs: Number(e.target.value) }))}
+            />
+          ),
+        },
+        {
+          key: 'suspiciousOnly',
+          label: '疑似阻塞过滤',
+          visible: isThreadBlocked,
+          control: (
+            <div className="param-switch-wrap">
+              <Switch
+                checked={(activeParams.suspiciousOnly ?? 1) === 1}
+                onChange={(checked) => setActiveParams((p) => ({ ...p, suspiciousOnly: checked ? 1 : 0 }))}
+              />
+            </div>
+          ),
+        },
+      ];
+
+      return fields.filter((f) => f.visible);
+    },
+    [activeParams, globalProcess, isEventAggregate, isThreadBlocked, isThreadTrend, processOptions, traceDurationSec],
+  );
 
   const [processListHover, setProcessListHover] = useState<{
     record: Record<string, unknown>;
@@ -160,11 +304,6 @@ function App() {
   }, [activePluginId, activeResult]);
 
   useEffect(() => () => cancelProcessListHide(), []);
-
-  const processOptions = useMemo(() => {
-    if (!dataset) return [];
-    return dataset.processes.map((p) => ({ label: p, value: p }));
-  }, [dataset]);
 
   const uploadProps: UploadProps = {
     showUploadList: false,
@@ -457,9 +596,9 @@ ORDER BY 1 ASC, 3 ASC;`;
   const blockedSuspiciousRuleText = useMemo(() => {
     if (activePlugin.id !== 'thread-blocked') return null;
     if ((activeParams.suspiciousOnly ?? 1) === 1) {
-      return '可疑阻塞口径：blocked_dur_ms > 1ms，且满足任一条件（state LIKE R% / state LIKE D% / io_wait=1 / blocked_function 非空）。';
+      return '疑似阻塞口径：满足任一条件（blocked_state=D / io_wait_flag=1 / blocked_dur_ms>=7）即展示。';
     }
-    return '当前展示全部阻塞事件（未启用“仅看可疑阻塞”过滤）。';
+    return '完整输出口径：展示主线程全部 blocked/sleeping 事件（不做时长过滤），用于全量排查。';
   }, [activePlugin.id, activeParams.suspiciousOnly]);
 
   const processListHoverPortal =
@@ -602,36 +741,31 @@ ORDER BY 1 ASC, 3 ASC;`;
         <Sider width={280} theme="light" style={{ borderRight: '1px solid #f0f0f0', padding: 12 }}>
           <Typography.Title level={5}>内置插件</Typography.Title>
           <Space direction="vertical" style={{ width: '100%' }} size={12}>
-            <Space direction="vertical" style={{ width: '100%' }} size={6}>
-              <Typography.Text strong>稳定版插件</Typography.Text>
-              {stablePlugins.map((p) => (
-                <Card key={p.id} size="small" hoverable onClick={() => setActivePluginId(p.id)} style={{ borderColor: p.id === activePluginId ? '#1677ff' : undefined }}>
-                  <Space direction="vertical" size={2}>
-                    <Typography.Text strong>{p.name}</Typography.Text>
-                    <Typography.Text type="secondary">{p.description}</Typography.Text>
-                    <Tag color="green">{p.outputType}</Tag>
-                  </Space>
-                </Card>
-              ))}
-            </Space>
-            <Space direction="vertical" style={{ width: '100%' }} size={6}>
-              <Typography.Text strong>调试中插件</Typography.Text>
-              {devPlugins.map((p) => (
-                <Card key={p.id} size="small" hoverable onClick={() => setActivePluginId(p.id)} style={{ borderColor: p.id === activePluginId ? '#1677ff' : undefined }}>
-                  <Space direction="vertical" size={2}>
-                    <Typography.Text strong>{p.name}</Typography.Text>
-                    <Typography.Text type="secondary">{p.description}</Typography.Text>
-                    <Tag color="orange">{p.outputType}</Tag>
-                  </Space>
-                </Card>
-              ))}
-            </Space>
+            {orderedPlugins.map((p) => (
+              <Card key={p.id} size="small" hoverable onClick={() => setActivePluginId(p.id)} style={{ borderColor: p.id === activePluginId ? '#1677ff' : undefined }}>
+                <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%' }}>
+                    <Typography.Text strong ellipsis style={{ minWidth: 0 }}>
+                      {p.name}
+                    </Typography.Text>
+                    <Tag color="blue" style={{ marginInlineEnd: 0, flexShrink: 0 }}>{p.outputType}</Tag>
+                  </div>
+                  <Typography.Text
+                    type="secondary"
+                    ellipsis={{ tooltip: p.description }}
+                    style={{ display: 'block' }}
+                  >
+                    {p.description}
+                  </Typography.Text>
+                </Space>
+              </Card>
+            ))}
           </Space>
         </Sider>
         <Content style={{ padding: 16 }}>
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
             {dataset ? (
-              <Row gutter={12}>
+              <Row gutter={[12, 20]}>
                 <Col span={6}><Statistic title="Trace 名称" value={dataset.summary.traceName} /></Col>
                 <Col span={6}><Statistic title="时间范围(相对s)" value={`0.00 - ${traceDurationSec.toFixed(2)}`} /></Col>
                 <Col span={4}><Statistic title="进程数" value={dataset.summary.processCount} /></Col>
@@ -641,59 +775,16 @@ ORDER BY 1 ASC, 3 ASC;`;
             ) : <Empty description="请先导入 trace 文件" />}
 
             <Card title={`参数配置 - ${activePlugin.name}`}>
-              <Row gutter={12}>
-                <Col span={isThreadTrend || isThreadBlocked ? 4 : 5}>
-                  <Input
-                    type="number"
-                    addonBefore="开始(s)"
-                    value={activeParams.startSec}
-                    onChange={(e) => setActiveParams((p) => ({ ...p, startSec: Number(e.target.value) }))}
-                  />
-                </Col>
-                <Col span={isThreadTrend || isThreadBlocked ? 4 : 5}>
-                  <Input
-                    type="number"
-                    addonBefore="结束(s)"
-                    value={activeParams.endSec}
-                    onChange={(e) => setActiveParams((p) => ({ ...p, endSec: Number(e.target.value) }))}
-                    max={traceDurationSec || undefined}
-                  />
-                </Col>
-                <Col span={isThreadTrend ? 6 : (isThreadBlocked ? 6 : 8)}>
-                  <Select
-                    allowClear
-                    showSearch
-                    optionFilterProp="label"
-                    placeholder="进程"
-                    style={{ width: '100%' }}
-                    options={processOptions}
-                    value={(globalProcess || activeParams.process) || undefined}
-                    onChange={(v) => setActiveParams((p) => ({ ...p, process: v ?? '' }))}
-                  />
-                </Col>
-                {isThreadTrend ? (
-                  <Col span={7}>
-                    <Input
-                      type="number"
-                      addonBefore="分桶(ms)"
-                      value={activeParams.bucketMs}
-                      onChange={(e) => setActiveParams((p) => ({ ...p, bucketMs: Number(e.target.value) }))}
-                    />
-                  </Col>
-                ) : null}
-                {isThreadBlocked ? (
-                  <Col span={7}>
-                    <Space>
-                      <Typography.Text>仅看可疑阻塞</Typography.Text>
-                      <Switch
-                        checked={(activeParams.suspiciousOnly ?? 1) === 1}
-                        onChange={(checked) => setActiveParams((p) => ({ ...p, suspiciousOnly: checked ? 1 : 0 }))}
-                      />
-                    </Space>
-                  </Col>
-                ) : null}
-                <Col span={isThreadTrend || isThreadBlocked ? 3 : 6}><Button type="primary" block loading={running} onClick={onRun}>运行</Button></Col>
-              </Row>
+              <div className="plugin-param-grid">
+                {paramFields.map((field) => (
+                  <ParamField key={field.key} label={field.label}>
+                    {field.control}
+                  </ParamField>
+                ))}
+              </div>
+              <div className="plugin-param-actions">
+                <Button type="primary" loading={running} onClick={onRun}>运行</Button>
+              </div>
               {isThreadTrend && (
                 <Row style={{ marginTop: 12 }} gutter={12}>
                   <Col span={8}>
@@ -728,6 +819,11 @@ ORDER BY 1 ASC, 3 ASC;`;
             </Card>
 
             <Card title="结果">
+              {activeResult?.stats?.length ? (
+                <Row gutter={12} style={{ marginBottom: 12 }}>
+                  {activeResult.stats.map((s) => <Col key={s.label} span={6}><Card size="small"><Statistic title={s.label} value={s.value} /></Card></Col>)}
+                </Row>
+              ) : null}
               {blockedSuspiciousRuleText ? (
                 <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
                   {blockedSuspiciousRuleText}
@@ -769,11 +865,6 @@ ORDER BY 1 ASC, 3 ASC;`;
                   children: <pre style={{ margin: 0, background: '#f6f8fa', padding: 12, borderRadius: 8, maxHeight: 320, overflow: 'auto' }}>{rawRowsJson}</pre>,
                 },
               ]} />
-              {activeResult?.stats?.length ? (
-                <Row gutter={12} style={{ marginTop: 12 }}>
-                  {activeResult.stats.map((s) => <Col key={s.label} span={6}><Card size="small"><Statistic title={s.label} value={s.value} /></Card></Col>)}
-                </Row>
-              ) : null}
               {activePlugin.id === 'thread-trend' && trendDiffCompared ? (
                 <Card size="small" style={{ marginTop: 12 }}>
                   <Space style={{ width: '100%', justifyContent: 'space-between' }}>

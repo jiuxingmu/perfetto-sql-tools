@@ -2,28 +2,9 @@ import type { PluginDefinition, QueryParams, QueryResult } from '../types';
 
 export const PLUGINS: PluginDefinition[] = [
   {
-    id: 'slice-list',
-    name: 'Slice 模糊匹配列表',
-    description: '某段时间内某进程/线程满足关键字的 slice 列表',
-    outputType: 'table',
-    sqlTemplate: `SELECT s.ts / 1e9 AS ts_sec, s.dur / 1e6 AS dur_ms, s.name,
-  COALESCE(t.name, printf('tid_%d', t.tid)) AS thread,
-  COALESCE(p.name, printf('pid_%d', p.pid)) AS process
-FROM slice s
-JOIN thread_track tt ON s.track_id = tt.id
-JOIN thread t ON tt.utid = t.utid
-LEFT JOIN process p ON t.upid = p.upid
-WHERE s.ts BETWEEN {{startSec}} * 1e9 AND {{endSec}} * 1e9
-  AND COALESCE(p.name, '') LIKE '%{{process}}%'
-  AND COALESCE(t.name, '') LIKE '%{{thread}}%'
-  AND s.name LIKE '%{{keyword}}%'
-ORDER BY s.ts ASC
-LIMIT 5000;`,
-  },
-  {
     id: 'thread-trend',
-    name: '线程数量变化趋势',
-    description: '按时刻点统计某进程线程数量变化',
+    name: '线程数量趋势',
+    description: '按时间分桶统计线程数',
     outputType: 'line',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -66,8 +47,8 @@ ORDER BY bucket_idx;`,
   },
   {
     id: 'event-aggregate',
-    name: '事件总耗时聚合',
-    description: '某类事件总耗时/均值/次数统计',
+    name: '事件耗时聚合',
+    description: '统计事件总耗时/均值/次数',
     outputType: 'stats',
     sqlTemplate: `SELECT s.name,
   SUM(s.dur) / 1e6 AS total_dur_ms,
@@ -82,46 +63,13 @@ WHERE s.ts BETWEEN {{startSec}} * 1e9 AND {{endSec}} * 1e9
   AND COALESCE(t.name, '') LIKE '%{{thread}}%'
   AND s.name LIKE '%{{keyword}}%'
 GROUP BY s.name
-ORDER BY total_dur_ms DESC
+ORDER BY {{aggregateOrderBy}}
 LIMIT 1000;`,
   },
   {
-    id: 'thread-state',
-    name: '线程状态明细',
-    description: '统计某个进程在时间范围内的线程状态分布',
-    outputType: 'table',
-    sqlTemplate: `WITH params AS (
-  SELECT
-    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
-    CAST({{endSec}} * 1e9 AS INT) AS end_ns
-)
-SELECT
-  COALESCE(p.name, printf('pid_%d', p.pid)) AS process,
-  COALESCE(t.name, printf('tid_%d', t.tid)) AS thread,
-  t.tid,
-  COALESCE(ts.state, 'unknown') AS state,
-  COUNT(1) AS state_samples,
-  ROUND(SUM(COALESCE(ts.dur, 0)) / 1e6, 3) AS state_dur_ms,
-  ROUND(MIN(ts.ts) / 1e9, 6) AS first_ts_sec,
-  ROUND(MAX(ts.ts + COALESCE(ts.dur, 0)) / 1e9, 6) AS last_ts_sec,
-  MAX(COALESCE(ts.io_wait, 0)) AS io_wait_flag
-FROM thread_state ts
-JOIN thread t ON ts.utid = t.utid
-LEFT JOIN process p ON t.upid = p.upid
-JOIN params x
-WHERE ts.ts <= x.end_ns
-  AND (ts.ts + COALESCE(ts.dur, 0)) >= x.start_ns
-  AND COALESCE(p.name, '') LIKE '%{{process}}%'
-  AND COALESCE(t.name, '') LIKE '%{{thread}}%'
-  AND COALESCE(ts.state, '') LIKE '%{{keyword}}%'
-GROUP BY process, thread, t.tid, state
-ORDER BY state_dur_ms DESC
-LIMIT 5000;`,
-  },
-  {
     id: 'process-list',
-    name: '进程列表',
-    description: '列举时间范围内匹配的进程信息',
+    name: '进程信息列表',
+    description: '时间范围内的进程明细',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -163,8 +111,8 @@ LIMIT 5000;`,
   },
   {
     id: 'thread-detail',
-    name: '线程列表',
-    description: '列举时间范围内匹配的线程信息',
+    name: '线程信息列表',
+    description: '时间范围内的线程明细',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -199,89 +147,124 @@ LIMIT 5000;`,
   {
     id: 'thread-blocked',
     name: '主线程阻塞分析',
-    description: '分析目标进程主线程在时间范围内被阻塞的情况',
+    description: '分析主线程阻塞与唤醒',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
     CAST({{startSec}} * 1e9 AS INT) AS start_ns,
     CAST({{endSec}} * 1e9 AS INT) AS end_ns
 ),
-blocked AS (
+trace_window AS (
+  SELECT start_ts AS trace_start_ns
+  FROM trace_bounds
+  LIMIT 1
+),
+main_thread_candidates AS (
+  SELECT
+    t.utid,
+    t.tid,
+    t.upid,
+    COALESCE(t.name, printf('tid_%d', t.tid)) AS thread_name,
+    -- 兼容说明：
+    -- 1) 常见 Perfetto 版本可直接使用 t.is_main_thread
+    -- 2) 若你的版本没有该字段，请将下面的 COALESCE(...) 改成:
+    --    CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END
+    COALESCE(t.is_main_thread, CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END) AS main_thread_score,
+    CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END AS main_name_score
+  FROM thread t
+  LEFT JOIN process p ON t.upid = p.upid
+  WHERE COALESCE(p.name, '') = '{{process}}'
+),
+target_main_thread AS (
+  SELECT utid, tid, upid, thread_name
+  FROM main_thread_candidates
+  ORDER BY main_thread_score DESC, main_name_score DESC, tid ASC
+  LIMIT 1
+),
+blocked_events AS (
   SELECT
     ts.utid,
     ts.state,
-    ts.ts AS blocked_start_ns,
+    ts.ts AS blocked_start_ts_ns,
     COALESCE(ts.dur, 0) AS dur,
-    ts.ts + COALESCE(ts.dur, 0) AS blocked_end_ns,
+    ts.ts + COALESCE(ts.dur, 0) AS blocked_end_ts_ns,
     ts.waker_utid,
     COALESCE(ts.io_wait, 0) AS io_wait,
     COALESCE(ts.blocked_function, '') AS blocked_function
   FROM thread_state ts
+  JOIN target_main_thread mt ON ts.utid = mt.utid
   JOIN params x
   WHERE ts.ts <= x.end_ns
     AND (ts.ts + COALESCE(ts.dur, 0)) >= x.start_ns
     AND COALESCE(ts.dur, 0) > 0
-    AND COALESCE(ts.state, '') NOT IN ('Running', 'Runnable', 'R')
+    AND COALESCE(ts.state, '') IN ('D', 'S', 'T', 't', 'X', 'x', 'K', 'W', 'I')
 )
 SELECT
   COALESCE(p.name, printf('pid_%d', p.pid)) AS process,
-  COALESCE(t.name, printf('tid_%d', t.tid)) AS thread,
-  t.tid AS blocked_tid,
+  mt.thread_name AS thread,
+  mt.tid AS blocked_tid,
   b.utid AS blocked_utid,
-  b.state AS blocked_state,
+  COALESCE(b.state, '') AS blocked_state,
   CASE
-    WHEN b.state LIKE 'R%' THEN 'cpu_runnable_wait'
+    WHEN COALESCE(b.state, '') = 'D' AND b.io_wait = 1 THEN 'uninterruptible sleep, io_wait'
+    WHEN COALESCE(b.state, '') = 'D' THEN 'uninterruptible sleep'
     WHEN b.io_wait = 1 THEN 'io_wait'
-    WHEN b.blocked_function != '' THEN 'kernel_block'
-    WHEN b.state = 'S' THEN 'sleep_wait'
-    ELSE 'state_wait'
+    ELSE ''
   END AS blocked_reason,
   CASE
-    WHEN b.state LIKE 'R%' THEN 1
+    WHEN COALESCE(b.state, '') = 'D' THEN 1
     WHEN b.io_wait = 1 THEN 1
-    WHEN b.blocked_function != '' THEN 1
-    WHEN b.state LIKE 'D%' THEN 1
+    WHEN b.dur >= 7e6 THEN 1
     ELSE 0
   END AS suspicious_block_flag,
-  ROUND(b.blocked_start_ns / 1e9, 6) AS blocked_start_ts_sec,
-  ROUND(b.blocked_end_ns / 1e9, 6) AS blocked_end_ts_sec,
+  ROUND((b.blocked_start_ts_ns - tw.trace_start_ns) / 1e9, 6) AS blocked_start_ts_sec,
+  ROUND((b.blocked_end_ts_ns - tw.trace_start_ns) / 1e9, 6) AS blocked_end_ts_sec,
   ROUND(b.dur / 1e6, 3) AS blocked_dur_ms,
   b.io_wait AS io_wait_flag,
   b.blocked_function,
   wt.tid AS waker_tid,
   COALESCE(wt.name, '') AS waker_thread,
   COALESCE(wp.name, '') AS waker_process
-FROM blocked b
-JOIN thread t ON b.utid = t.utid
-LEFT JOIN process p ON t.upid = p.upid
+FROM blocked_events b
+JOIN target_main_thread mt ON b.utid = mt.utid
+LEFT JOIN process p ON mt.upid = p.upid
+LEFT JOIN trace_window tw
 LEFT JOIN thread wt ON b.waker_utid = wt.utid
 LEFT JOIN process wp ON wt.upid = wp.upid
-WHERE COALESCE(p.name, '') LIKE '%{{process}}%'
-  AND COALESCE(t.is_main_thread, 0) = 1
+WHERE COALESCE(p.name, '') = '{{process}}'
   AND (
-    {{suspiciousOnly}} = 0
-    OR (
-      b.dur > 1e6
-      AND (
-        b.state LIKE 'R%'
-        OR b.io_wait = 1
-        OR b.blocked_function != ''
-        OR b.state LIKE 'D%'
-      )
-    )
+    ({{suspiciousOnly}} = 1 AND (
+      COALESCE(b.state, '') = 'D'
+      OR b.io_wait = 1
+      OR b.dur >= 7e6
+    ))
+    OR {{suspiciousOnly}} = 0
   )
-ORDER BY b.blocked_start_ns ASC
+ORDER BY b.dur DESC, b.blocked_start_ts_ns ASC
 LIMIT 5000;`,
   },
 ];
 
 export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
+  const aggregateOrderBy = (() => {
+    switch (p.aggregateOrder) {
+      case 'total_desc':
+        return 'total_dur_ms DESC, cnt DESC, s.name ASC';
+      case 'count_desc':
+        return 'cnt DESC, total_dur_ms DESC, s.name ASC';
+      case 'avg_desc':
+      default:
+        return 'avg_dur_ms DESC, total_dur_ms DESC, s.name ASC';
+    }
+  })();
+
   return def.sqlTemplate
     .replaceAll('{{startSec}}', String(p.startSec))
     .replaceAll('{{endSec}}', String(p.endSec))
     .replaceAll('{{process}}', p.process ?? '')
     .replaceAll('{{thread}}', p.thread ?? '')
     .replaceAll('{{keyword}}', p.keyword ?? '')
+    .replaceAll('{{aggregateOrderBy}}', aggregateOrderBy)
     .replaceAll('{{suspiciousOnly}}', String(Math.max(0, Math.min(1, Number(p.suspiciousOnly ?? 0)))))
     .replaceAll('{{bucketMs}}', String(Math.max(1, p.bucketMs ?? 1000)));
 }

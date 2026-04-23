@@ -10,9 +10,14 @@ const EXPLICIT_TRACE_TIME_KEYS = new Set([
 ]);
 
 const RELATIVE_SEC_THREE_DECIMAL_KEYS = new Set(['window_start_sec', 'window_end_sec']);
+const ALREADY_RELATIVE_SEC_KEYS = new Set([
+  'blocked_start_ts_sec',
+  'blocked_end_ts_sec',
+]);
 
 /** Perfetto 查询结果里「相对 trace 起点」的绝对时间列（单位：秒，与 summary.timeRange 同源）。 */
 export function isAbsoluteTraceTimeColumn(key: string): boolean {
+  if (ALREADY_RELATIVE_SEC_KEYS.has(key)) return false;
   if (EXPLICIT_TRACE_TIME_KEYS.has(key)) return true;
   if (key.includes('dur')) return false;
   if (key.endsWith('_ts_sec')) return true;
