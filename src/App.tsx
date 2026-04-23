@@ -13,7 +13,7 @@ import {
 } from './lib/traceRelativeTime';
 import type { PluginDefinition, QueryParams, QueryResult, TraceDataset } from './types';
 
-const { Header, Sider, Content } = Layout;
+const { Header, Sider, Content, Footer } = Layout;
 const STABLE_PLUGIN_IDS: PluginDefinition['id'][] = ['process-list', 'thread-detail'];
 
 /** 结果表列宽：总和用于 `scroll.x`，避免列多时被压到只看见前几列。 */
@@ -611,6 +611,9 @@ function App() {
           </Space>
         </Content>
       </Layout>
+      <Footer style={{ textAlign: 'center', color: '#64748b', fontSize: 12, padding: '10px 24px' }}>
+        Copyright © {new Date().getFullYear()} rengao
+      </Footer>
       {processListHoverPortal}
     </Layout>
   );
