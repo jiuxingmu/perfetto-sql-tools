@@ -14,6 +14,7 @@ import {
 import type { PluginDefinition, QueryParams, QueryResult, TraceDataset } from './types';
 
 const { Header, Sider, Content } = Layout;
+const STABLE_PLUGIN_IDS: PluginDefinition['id'][] = ['process-list', 'thread-detail'];
 
 /** 结果表列宽：总和用于 `scroll.x`，避免列多时被压到只看见前几列。 */
 function getResultColumnWidth(key: string): number {
@@ -104,6 +105,7 @@ function createDefaultParams(defaultEndSec: number): QueryParams {
 function App() {
   const [dataset, setDataset] = useState<TraceDataset | null>(null);
   const [loading, setLoading] = useState(false);
+  const [globalProcess, setGlobalProcess] = useState('');
   const [activePluginId, setActivePluginId] = useState<PluginDefinition['id']>('slice-list');
   const [paramsByPlugin, setParamsByPlugin] = useState<Record<PluginDefinition['id'], QueryParams>>(() =>
     Object.fromEntries(
@@ -117,6 +119,8 @@ function App() {
   const traceDurationSec = Math.max(0, traceEndSec - traceStartSec);
 
   const activePlugin = useMemo(() => PLUGINS.find((p) => p.id === activePluginId)!, [activePluginId]);
+  const stablePlugins = useMemo(() => PLUGINS.filter((p) => STABLE_PLUGIN_IDS.includes(p.id)), []);
+  const devPlugins = useMemo(() => PLUGINS.filter((p) => !STABLE_PLUGIN_IDS.includes(p.id)), []);
   const activeParams = paramsByPlugin[activePluginId] ?? createDefaultParams(10);
   const activeResult = resultByPlugin[activePluginId] ?? null;
   const showThreadFilter = activePlugin.id !== 'process-list';
@@ -174,6 +178,7 @@ function App() {
         }
         const parsed = (await resp.json()) as TraceDataset;
         setDataset(parsed);
+        setGlobalProcess('');
         const relativeEndSec = Number((parsed.summary.timeRange[1] - parsed.summary.timeRange[0]).toFixed(3));
         setResultByPlugin({});
         setParamsByPlugin(
@@ -211,6 +216,7 @@ function App() {
     try {
       const absParams: QueryParams = {
         ...activeParams,
+        process: globalProcess || activeParams.process,
         startSec: activeParams.startSec + traceStartSec,
         endSec: activeParams.endSec + traceStartSec,
       };
@@ -429,21 +435,62 @@ function App() {
     <Layout style={{ minHeight: '100vh' }}>
       <Header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0f172a' }}>
         <Typography.Title level={4} style={{ color: '#fff', margin: 0 }}>Perfetto SQL 可视化工具</Typography.Title>
-        <Upload {...uploadProps}><Button loading={loading} type="primary">导入 Trace 文件</Button></Upload>
+        <Space size={10}>
+          <Upload {...uploadProps}>
+            <Button
+              loading={loading}
+              type="primary"
+              style={{
+                background: '#1677ff',
+                borderColor: '#1677ff',
+                color: '#fff',
+                fontWeight: 600,
+                boxShadow: '0 2px 8px rgba(22,119,255,0.35)',
+              }}
+            >
+              导入 Trace 文件
+            </Button>
+          </Upload>
+          <Select
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder="全局进程(可选)"
+            style={{ width: 260 }}
+            options={processOptions}
+            value={globalProcess || undefined}
+            onChange={(v) => setGlobalProcess(v ?? '')}
+          />
+        </Space>
       </Header>
       <Layout>
         <Sider width={280} theme="light" style={{ borderRight: '1px solid #f0f0f0', padding: 12 }}>
           <Typography.Title level={5}>内置插件</Typography.Title>
-          <Space direction="vertical" style={{ width: '100%' }}>
-            {PLUGINS.map((p) => (
-              <Card key={p.id} size="small" hoverable onClick={() => setActivePluginId(p.id)} style={{ borderColor: p.id === activePluginId ? '#1677ff' : undefined }}>
-                <Space direction="vertical" size={2}>
-                  <Typography.Text strong>{p.name}</Typography.Text>
-                  <Typography.Text type="secondary">{p.description}</Typography.Text>
-                  <Tag color="blue">{p.outputType}</Tag>
-                </Space>
-              </Card>
-            ))}
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <Space direction="vertical" style={{ width: '100%' }} size={6}>
+              <Typography.Text strong>稳定版插件</Typography.Text>
+              {stablePlugins.map((p) => (
+                <Card key={p.id} size="small" hoverable onClick={() => setActivePluginId(p.id)} style={{ borderColor: p.id === activePluginId ? '#1677ff' : undefined }}>
+                  <Space direction="vertical" size={2}>
+                    <Typography.Text strong>{p.name}</Typography.Text>
+                    <Typography.Text type="secondary">{p.description}</Typography.Text>
+                    <Tag color="green">{p.outputType}</Tag>
+                  </Space>
+                </Card>
+              ))}
+            </Space>
+            <Space direction="vertical" style={{ width: '100%' }} size={6}>
+              <Typography.Text strong>调试中插件</Typography.Text>
+              {devPlugins.map((p) => (
+                <Card key={p.id} size="small" hoverable onClick={() => setActivePluginId(p.id)} style={{ borderColor: p.id === activePluginId ? '#1677ff' : undefined }}>
+                  <Space direction="vertical" size={2}>
+                    <Typography.Text strong>{p.name}</Typography.Text>
+                    <Typography.Text type="secondary">{p.description}</Typography.Text>
+                    <Tag color="orange">{p.outputType}</Tag>
+                  </Space>
+                </Card>
+              ))}
+            </Space>
           </Space>
         </Sider>
         <Content style={{ padding: 16 }}>
@@ -485,7 +532,7 @@ function App() {
                     placeholder="进程"
                     style={{ width: '100%' }}
                     options={processOptions}
-                    value={activeParams.process || undefined}
+                    value={(globalProcess || activeParams.process) || undefined}
                     onChange={(v) => setActiveParams((p) => ({ ...p, process: v ?? '' }))}
                   />
                 </Col>
