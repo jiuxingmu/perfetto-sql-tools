@@ -22,6 +22,7 @@ export type QueryParams = {
   thread?: string;
   keyword?: string;
   bucketMs?: number;
+  suspiciousOnly?: number;
 };
 
 export type PluginDefinition = {

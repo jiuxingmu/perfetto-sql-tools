@@ -258,6 +258,18 @@ LEFT JOIN thread wt ON b.waker_utid = wt.utid
 LEFT JOIN process wp ON wt.upid = wp.upid
 WHERE COALESCE(p.name, '') LIKE '%{{process}}%'
   AND COALESCE(t.is_main_thread, 0) = 1
+  AND (
+    {{suspiciousOnly}} = 0
+    OR (
+      b.dur > 1e6
+      AND (
+        b.state LIKE 'R%'
+        OR b.io_wait = 1
+        OR b.blocked_function != ''
+        OR b.state LIKE 'D%'
+      )
+    )
+  )
 ORDER BY b.blocked_start_ns ASC
 LIMIT 5000;`,
   },
@@ -270,6 +282,7 @@ export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
     .replaceAll('{{process}}', p.process ?? '')
     .replaceAll('{{thread}}', p.thread ?? '')
     .replaceAll('{{keyword}}', p.keyword ?? '')
+    .replaceAll('{{suspiciousOnly}}', String(Math.max(0, Math.min(1, Number(p.suspiciousOnly ?? 0)))))
     .replaceAll('{{bucketMs}}', String(Math.max(1, p.bucketMs ?? 1000)));
 }
 

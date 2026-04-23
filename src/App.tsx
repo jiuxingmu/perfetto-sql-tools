@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Card, Col, Empty, Input, Layout, Modal, Row, Select, Space, Statistic, Table, Tabs, Tag, Typography, Upload, Button, message } from 'antd';
+import { Card, Col, Empty, Input, Layout, Modal, Row, Select, Space, Statistic, Switch, Table, Tabs, Tag, Typography, Upload, Button, message } from 'antd';
 import type { UploadProps } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import { PLUGINS, runPluginQuery } from './lib/plugins';
@@ -99,6 +99,7 @@ function createDefaultParams(defaultEndSec: number): QueryParams {
     process: '',
     thread: '',
     keyword: '',
+    suspiciousOnly: 1,
   };
 }
 
@@ -127,6 +128,7 @@ function App() {
   const stablePlugins = useMemo(() => PLUGINS.filter((p) => STABLE_PLUGIN_IDS.includes(p.id)), []);
   const devPlugins = useMemo(() => PLUGINS.filter((p) => !STABLE_PLUGIN_IDS.includes(p.id)), []);
   const isThreadTrend = activePlugin.id === 'thread-trend';
+  const isThreadBlocked = activePlugin.id === 'thread-blocked';
   const activeParams = paramsByPlugin[activePluginId] ?? createDefaultParams(10);
   const activeResult = resultByPlugin[activePluginId] ?? null;
 
@@ -452,6 +454,14 @@ ORDER BY 1 ASC, 3 ASC;`;
     return `筛选条件：时间=${timeRange}，进程=${p}；共计 ${count} 条结果。`;
   }, [activePlugin.id, activeResult, activeParams.endSec, activeParams.process, activeParams.startSec, activeParams.thread, globalProcess]);
 
+  const blockedSuspiciousRuleText = useMemo(() => {
+    if (activePlugin.id !== 'thread-blocked') return null;
+    if ((activeParams.suspiciousOnly ?? 1) === 1) {
+      return '可疑阻塞口径：blocked_dur_ms > 1ms，且满足任一条件（state LIKE R% / state LIKE D% / io_wait=1 / blocked_function 非空）。';
+    }
+    return '当前展示全部阻塞事件（未启用“仅看可疑阻塞”过滤）。';
+  }, [activePlugin.id, activeParams.suspiciousOnly]);
+
   const processListHoverPortal =
     processListHover && (activePlugin.id === 'process-list' || activePlugin.id === 'thread-detail')
       ? (() => {
@@ -632,7 +642,7 @@ ORDER BY 1 ASC, 3 ASC;`;
 
             <Card title={`参数配置 - ${activePlugin.name}`}>
               <Row gutter={12}>
-                <Col span={isThreadTrend ? 4 : 5}>
+                <Col span={isThreadTrend || isThreadBlocked ? 4 : 5}>
                   <Input
                     type="number"
                     addonBefore="开始(s)"
@@ -640,7 +650,7 @@ ORDER BY 1 ASC, 3 ASC;`;
                     onChange={(e) => setActiveParams((p) => ({ ...p, startSec: Number(e.target.value) }))}
                   />
                 </Col>
-                <Col span={isThreadTrend ? 4 : 5}>
+                <Col span={isThreadTrend || isThreadBlocked ? 4 : 5}>
                   <Input
                     type="number"
                     addonBefore="结束(s)"
@@ -649,7 +659,7 @@ ORDER BY 1 ASC, 3 ASC;`;
                     max={traceDurationSec || undefined}
                   />
                 </Col>
-                <Col span={isThreadTrend ? 6 : 8}>
+                <Col span={isThreadTrend ? 6 : (isThreadBlocked ? 6 : 8)}>
                   <Select
                     allowClear
                     showSearch
@@ -671,7 +681,18 @@ ORDER BY 1 ASC, 3 ASC;`;
                     />
                   </Col>
                 ) : null}
-                <Col span={isThreadTrend ? 3 : 6}><Button type="primary" block loading={running} onClick={onRun}>运行</Button></Col>
+                {isThreadBlocked ? (
+                  <Col span={7}>
+                    <Space>
+                      <Typography.Text>仅看可疑阻塞</Typography.Text>
+                      <Switch
+                        checked={(activeParams.suspiciousOnly ?? 1) === 1}
+                        onChange={(checked) => setActiveParams((p) => ({ ...p, suspiciousOnly: checked ? 1 : 0 }))}
+                      />
+                    </Space>
+                  </Col>
+                ) : null}
+                <Col span={isThreadTrend || isThreadBlocked ? 3 : 6}><Button type="primary" block loading={running} onClick={onRun}>运行</Button></Col>
               </Row>
               {isThreadTrend && (
                 <Row style={{ marginTop: 12 }} gutter={12}>
@@ -707,6 +728,11 @@ ORDER BY 1 ASC, 3 ASC;`;
             </Card>
 
             <Card title="结果">
+              {blockedSuspiciousRuleText ? (
+                <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                  {blockedSuspiciousRuleText}
+                </Typography.Text>
+              ) : null}
               {listSummaryText ? (
                 <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
                   {listSummaryText}
