@@ -73,11 +73,13 @@ export function buildPluginSpecificParamFields({
   isEventAggregate,
   isThreadTrend,
   isThreadBlocked,
+  isCpuUsageAnalysis,
   setActiveParams,
 }: Pick<SharedArgs, 'activeParams' | 'setActiveParams'> & {
   isEventAggregate: boolean;
   isThreadTrend: boolean;
   isThreadBlocked: boolean;
+  isCpuUsageAnalysis: boolean;
 }): ParamFieldDraft[] {
   return [
     {
@@ -122,6 +124,68 @@ export function buildPluginSpecificParamFields({
           value={activeParams.bucketMs}
           onChange={(e) => setActiveParams((p) => ({ ...p, bucketMs: Number(e.target.value) }))}
         />
+      ),
+    },
+    {
+      key: 'cpuStatLevel',
+      label: '统计粒度',
+      visible: isCpuUsageAnalysis,
+      control: (
+        <Select
+          style={{ width: '100%' }}
+          value={activeParams.statLevel ?? 'thread'}
+          onChange={(v) => setActiveParams((p) => ({ ...p, statLevel: v as QueryParams['statLevel'] }))}
+          options={[
+            { label: '按线程', value: 'thread' },
+            { label: '按进程', value: 'process' },
+          ]}
+        />
+      ),
+    },
+    {
+      key: 'cpuPid',
+      label: 'PID(可选)',
+      visible: isCpuUsageAnalysis,
+      control: (
+        <Input
+          type="number"
+          placeholder="不填表示全部"
+          value={activeParams.pid}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, pid: Number.isFinite(value) ? value : undefined }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'cpuTopN',
+      label: 'Top N',
+      visible: isCpuUsageAnalysis,
+      control: (
+        <Input
+          type="number"
+          min={1}
+          max={500}
+          value={activeParams.topN ?? 10}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, topN: Number.isFinite(value) ? value : 10 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'cpuOnlyMain',
+      label: '仅主线程',
+      visible: isCpuUsageAnalysis,
+      control: (
+        <div className="param-switch-wrap">
+          <Switch
+            checked={(activeParams.onlyMainThread ?? 0) === 1}
+            onChange={(checked) => setActiveParams((p) => ({ ...p, onlyMainThread: checked ? 1 : 0 }))}
+          />
+        </div>
       ),
     },
     {

@@ -2,6 +2,7 @@ import { Table } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import type { PluginDefinition, QueryResult } from '../../types';
 import type { TableRowHoverHandler } from '../workbench/WorkbenchTypes';
+import { CpuResultPanel } from '../cpu';
 
 type VisualizationPanelProps = {
   activePluginId: PluginDefinition['id'];
@@ -24,6 +25,9 @@ export function VisualizationPanel({
 }: VisualizationPanelProps) {
   if (activePluginId === 'thread-trend' && lineOption) {
     return <ReactECharts option={lineOption} style={{ height: 320 }} />;
+  }
+  if (activePluginId === 'cpu-usage-analysis') {
+    return <CpuResultPanel activeResult={activeResult} />;
   }
 
   return (

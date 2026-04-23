@@ -13,15 +13,25 @@ export type TraceDataset = {
   threads: string[];
 };
 
-export type PluginId = 'thread-trend' | 'event-aggregate' | 'process-list' | 'thread-detail' | 'thread-blocked';
+export type PluginId =
+  | 'thread-trend'
+  | 'event-aggregate'
+  | 'process-list'
+  | 'thread-detail'
+  | 'thread-blocked'
+  | 'cpu-usage-analysis';
 
 export type QueryParams = {
   startSec: number;
   endSec: number;
   process?: string;
+  pid?: number;
   thread?: string;
   keyword?: string;
   bucketMs?: number;
+  topN?: number;
+  onlyMainThread?: number;
+  statLevel?: 'process' | 'thread';
   suspiciousOnly?: number;
   aggregateOrder?: 'avg_desc' | 'total_desc' | 'count_desc';
 };

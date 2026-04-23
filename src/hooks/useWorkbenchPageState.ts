@@ -40,6 +40,7 @@ export function useWorkbenchPageState() {
     isEventAggregate: activePlugin.id === 'event-aggregate',
     isThreadTrend: activePlugin.id === 'thread-trend',
     isThreadBlocked: activePlugin.id === 'thread-blocked',
+    isCpuUsageAnalysis: activePlugin.id === 'cpu-usage-analysis',
     traceDurationSec,
     setActiveParams,
   });

@@ -2,6 +2,99 @@ import type { PluginDefinition, QueryParams, QueryResult } from '../types';
 
 export const PLUGINS: PluginDefinition[] = [
   {
+    id: 'cpu-usage-analysis',
+    name: 'CPU 占用分析',
+    description: '分析进程/线程 CPU 热点及占比',
+    outputType: 'table',
+    sqlTemplate: `WITH params AS (
+  SELECT
+    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
+    CAST({{endSec}} * 1e9 AS INT) AS end_ns,
+    CAST(MAX(1, {{topN}}) AS INT) AS top_n,
+    CAST(MAX(0, {{onlyMainThread}}) AS INT) AS only_main_thread,
+    CAST({{pid}} AS INT) AS target_pid
+),
+sched_scope AS (
+  SELECT
+    s.ts,
+    s.dur,
+    s.utid,
+    t.tid,
+    COALESCE(t.name, printf('tid_%d', t.tid)) AS thread_name,
+    COALESCE(t.is_main_thread, 0) AS is_main_thread,
+    p.pid,
+    COALESCE(p.name, printf('pid_%d', p.pid)) AS process_name
+  FROM sched s
+  JOIN thread t ON s.utid = t.utid
+  LEFT JOIN process p ON t.upid = p.upid
+  JOIN params x
+  WHERE s.ts < x.end_ns
+    AND (s.ts + COALESCE(s.dur, 0)) > x.start_ns
+    AND ('{{process}}' = '' OR COALESCE(p.name, '') = '{{process}}')
+    AND (x.target_pid <= 0 OR COALESCE(p.pid, -1) = x.target_pid)
+    AND (x.only_main_thread = 0 OR COALESCE(t.is_main_thread, 0) = 1)
+),
+clipped AS (
+  SELECT
+    process_name,
+    pid,
+    thread_name,
+    tid,
+    is_main_thread,
+    MAX(0, MIN(ts + dur, x.end_ns) - MAX(ts, x.start_ns)) AS overlap_dur_ns
+  FROM sched_scope
+  JOIN params x
+  WHERE COALESCE(dur, 0) > 0
+),
+process_agg AS (
+  SELECT
+    process_name AS name,
+    pid,
+    NULL AS tid,
+    SUM(overlap_dur_ns) AS cpu_dur_ns,
+    COUNT(1) AS slice_count,
+    AVG(overlap_dur_ns) AS avg_slice_dur_ns,
+    0 AS main_thread_ratio
+  FROM clipped
+  GROUP BY process_name, pid
+),
+thread_agg AS (
+  SELECT
+    thread_name AS name,
+    pid,
+    tid,
+    SUM(overlap_dur_ns) AS cpu_dur_ns,
+    COUNT(1) AS slice_count,
+    AVG(overlap_dur_ns) AS avg_slice_dur_ns,
+    AVG(CASE WHEN is_main_thread = 1 THEN 1.0 ELSE 0.0 END) AS main_thread_ratio
+  FROM clipped
+  GROUP BY thread_name, pid, tid
+),
+selected_agg AS (
+  SELECT * FROM process_agg WHERE '{{statLevel}}' = 'process'
+  UNION ALL
+  SELECT * FROM thread_agg WHERE '{{statLevel}}' = 'thread'
+),
+total AS (
+  SELECT SUM(cpu_dur_ns) AS total_cpu_dur_ns FROM selected_agg
+)
+SELECT
+  '{{statLevel}}' AS stat_level,
+  name,
+  pid,
+  tid,
+  ROUND(cpu_dur_ns / 1e6, 3) AS cpu_dur_ms,
+  ROUND(cpu_dur_ns * 1.0 / NULLIF(total_cpu_dur_ns, 0), 6) AS cpu_ratio,
+  slice_count,
+  ROUND(avg_slice_dur_ns / 1e6, 3) AS avg_slice_dur_ms,
+  CASE WHEN main_thread_ratio >= 0.5 THEN 1 ELSE 0 END AS is_main_thread
+FROM selected_agg
+JOIN total
+WHERE cpu_dur_ns > 0
+ORDER BY cpu_dur_ns DESC, name ASC
+LIMIT (SELECT top_n FROM params);`,
+  },
+  {
     id: 'thread-trend',
     name: '线程数量趋势',
     description: '按时间分桶统计线程数',
@@ -264,6 +357,10 @@ export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
     .replaceAll('{{process}}', p.process ?? '')
     .replaceAll('{{thread}}', p.thread ?? '')
     .replaceAll('{{keyword}}', p.keyword ?? '')
+    .replaceAll('{{pid}}', String(Math.max(0, Number(p.pid ?? 0))))
+    .replaceAll('{{topN}}', String(Math.max(1, Number(p.topN ?? 10))))
+    .replaceAll('{{onlyMainThread}}', String(Math.max(0, Math.min(1, Number(p.onlyMainThread ?? 0)))))
+    .replaceAll('{{statLevel}}', p.statLevel === 'process' ? 'process' : 'thread')
     .replaceAll('{{aggregateOrderBy}}', aggregateOrderBy)
     .replaceAll('{{suspiciousOnly}}', String(Math.max(0, Math.min(1, Number(p.suspiciousOnly ?? 0)))))
     .replaceAll('{{bucketMs}}', String(Math.max(1, p.bucketMs ?? 1000)));
@@ -288,6 +385,18 @@ function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): 
       { label: '总次数', value: totalCount },
       { label: '事件种类', value: rows.length },
       { label: '平均耗时(ms)', value: totalCount ? (totalDur / totalCount).toFixed(2) : 0 },
+    ];
+  }
+  if (plugin.id === 'cpu-usage-analysis') {
+    const totalCpuDur = rows.reduce((acc, r) => acc + Number(r.cpu_dur_ms ?? 0), 0);
+    const top = rows[0] as Record<string, unknown> | undefined;
+    const top10Ratio = rows.slice(0, 10).reduce((acc, r) => acc + Number(r.cpu_ratio ?? 0), 0);
+    const threadHotCount = rows.filter((r) => Number(r.cpu_ratio ?? 0) >= 0.05).length;
+    return [
+      { label: '总 CPU 时长(ms)', value: Number(totalCpuDur.toFixed(2)) },
+      { label: 'Top1', value: String(top?.name ?? '-') },
+      { label: '热点线程数', value: threadHotCount },
+      { label: 'Top10 占比', value: `${(top10Ratio * 100).toFixed(2)}%` },
     ];
   }
   return undefined;

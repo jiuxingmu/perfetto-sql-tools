@@ -219,3 +219,7 @@
 .plugin-param-actions .ant-btn {
   min-width: 120px;
 }
+
+.cpu-selected-row > td {
+  background: #e6f4ff !important;
+}
