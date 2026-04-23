@@ -1,51 +1,21 @@
 import { Button, Card, Col, Row, Space, Statistic, Typography } from 'antd';
-import type { PluginDefinition, QueryResult } from '../types';
+import type { ResultViewProps, TrendDiffSummaryProps } from './workbenchTypes';
 import { ResultTabs } from './results/ResultTabs';
 
 type ResultsCardProps = {
-  activePlugin: PluginDefinition;
-  activeResult: QueryResult | null;
-  blockedSuspiciousRuleText: string | null;
-  listSummaryText: string | null;
-  lineOption: Record<string, unknown> | null;
-  tableColumns: Array<Record<string, unknown>>;
-  tableScrollX: number;
-  tableRowKey: (record: Record<string, unknown>, index?: number) => string;
-  processListTableOnRow:
-    | ((record: Record<string, unknown>) => {
-      onMouseEnter: (e: { clientX: number; clientY: number }) => void;
-      onMouseMove: (e: { clientX: number; clientY: number }) => void;
-      onMouseLeave: () => void;
-    })
-    | undefined;
-  rawRowsJson: string;
-  trendDiffCompared: boolean;
-  trendOpenedCount: number;
-  trendClosedCount: number;
-  onOpenTrendDiffModal: () => void;
+  view: ResultViewProps;
+  trendDiff?: TrendDiffSummaryProps;
 };
 
 export function ResultsCard({
-  activePlugin,
-  activeResult,
-  blockedSuspiciousRuleText,
-  listSummaryText,
-  lineOption,
-  tableColumns,
-  tableScrollX,
-  tableRowKey,
-  processListTableOnRow,
-  rawRowsJson,
-  trendDiffCompared,
-  trendOpenedCount,
-  trendClosedCount,
-  onOpenTrendDiffModal,
+  view,
+  trendDiff,
 }: ResultsCardProps) {
   return (
     <Card title="结果">
-      {activeResult?.stats?.length ? (
+      {view.activeResult?.stats?.length ? (
         <Row gutter={12} style={{ marginBottom: 12 }}>
-          {activeResult.stats.map((s) => (
+          {view.activeResult.stats.map((s) => (
             <Col key={s.label} span={6}>
               <Card size="small"><Statistic title={s.label} value={s.value} /></Card>
             </Col>
@@ -53,35 +23,35 @@ export function ResultsCard({
         </Row>
       ) : null}
 
-      {blockedSuspiciousRuleText ? (
+      {view.blockedSuspiciousRuleText ? (
         <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-          {blockedSuspiciousRuleText}
+          {view.blockedSuspiciousRuleText}
         </Typography.Text>
       ) : null}
-      {listSummaryText ? (
+      {view.listSummaryText ? (
         <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-          {listSummaryText}
+          {view.listSummaryText}
         </Typography.Text>
       ) : null}
 
       <ResultTabs
-        activePluginId={activePlugin.id}
-        activeResult={activeResult}
-        lineOption={lineOption}
-        tableColumns={tableColumns}
-        tableScrollX={tableScrollX}
-        tableRowKey={tableRowKey}
-        processListTableOnRow={processListTableOnRow}
-        rawRowsJson={rawRowsJson}
+        activePluginId={view.activePluginId}
+        activeResult={view.activeResult}
+        lineOption={view.lineOption}
+        tableColumns={view.tableColumns}
+        tableScrollX={view.tableScrollX}
+        tableRowKey={view.tableRowKey}
+        processListTableOnRow={view.processListTableOnRow}
+        rawRowsJson={view.rawRowsJson}
       />
 
-      {activePlugin.id === 'thread-trend' && trendDiffCompared ? (
+      {trendDiff ? (
         <Card size="small" style={{ marginTop: 12 }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Typography.Text type="secondary">
-              t1→t2 已完成对比：新开 {trendOpenedCount}，关闭 {trendClosedCount}
+              t1→t2 已完成对比：新开 {trendDiff.openedCount}，关闭 {trendDiff.closedCount}
             </Typography.Text>
-            <Button onClick={onOpenTrendDiffModal}>查看线程变化详情</Button>
+            <Button onClick={trendDiff.onOpenModal}>查看线程变化详情</Button>
           </Space>
         </Card>
       ) : null}

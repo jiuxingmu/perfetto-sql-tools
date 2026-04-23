@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Input, Select, Switch } from 'antd';
-import type { ParamFieldConfig } from '../components/ParamsCard';
+import type { ParamFieldConfig } from '../components/workbenchTypes';
 import type { QueryParams } from '../types';
 
 type UseParamFieldsArgs = {

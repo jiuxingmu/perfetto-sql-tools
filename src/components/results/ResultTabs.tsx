@@ -1,5 +1,6 @@
 import { Tabs } from 'antd';
 import type { PluginDefinition, QueryResult } from '../../types';
+import type { TableRowHoverHandler } from '../workbenchTypes';
 import { VisualizationPanel } from './VisualizationPanel';
 
 type ResultTabsProps = {
@@ -9,13 +10,7 @@ type ResultTabsProps = {
   tableColumns: Array<Record<string, unknown>>;
   tableScrollX: number;
   tableRowKey: (record: Record<string, unknown>, index?: number) => string;
-  processListTableOnRow:
-    | ((record: Record<string, unknown>) => {
-      onMouseEnter: (e: { clientX: number; clientY: number }) => void;
-      onMouseMove: (e: { clientX: number; clientY: number }) => void;
-      onMouseLeave: () => void;
-    })
-    | undefined;
+  processListTableOnRow: TableRowHoverHandler;
   rawRowsJson: string;
 };
 

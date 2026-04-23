@@ -1,6 +1,7 @@
 import { Table } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import type { PluginDefinition, QueryResult } from '../../types';
+import type { TableRowHoverHandler } from '../workbenchTypes';
 
 type VisualizationPanelProps = {
   activePluginId: PluginDefinition['id'];
@@ -9,13 +10,7 @@ type VisualizationPanelProps = {
   tableColumns: Array<Record<string, unknown>>;
   tableScrollX: number;
   tableRowKey: (record: Record<string, unknown>, index?: number) => string;
-  processListTableOnRow:
-    | ((record: Record<string, unknown>) => {
-      onMouseEnter: (e: { clientX: number; clientY: number }) => void;
-      onMouseMove: (e: { clientX: number; clientY: number }) => void;
-      onMouseLeave: () => void;
-    })
-    | undefined;
+  processListTableOnRow: TableRowHoverHandler;
 };
 
 export function VisualizationPanel({
