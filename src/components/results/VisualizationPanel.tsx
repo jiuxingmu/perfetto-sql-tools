@@ -5,6 +5,7 @@ import type { TableRowHoverHandler } from '../workbench/WorkbenchTypes';
 import { CpuResultPanel } from '../cpu';
 import { JankResultPanel } from '../jank';
 import { ProcessOverviewPanel } from '../process';
+import { ThreadOverviewPanel } from '../thread';
 import { WaitResultPanel } from '../wait';
 
 type VisualizationPanelProps = {
@@ -28,6 +29,9 @@ export function VisualizationPanel({
 }: VisualizationPanelProps) {
   if (activePluginId === 'thread-trend' && lineOption) {
     return <ReactECharts option={lineOption} style={{ height: 320 }} />;
+  }
+  if (activePluginId === 'thread-overview') {
+    return <ThreadOverviewPanel activeResult={activeResult} />;
   }
   if (activePluginId === 'cpu-usage-analysis') {
     return <CpuResultPanel activeResult={activeResult} />;

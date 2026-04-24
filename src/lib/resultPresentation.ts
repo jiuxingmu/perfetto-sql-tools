@@ -1,8 +1,7 @@
-import { isAbsoluteTraceTimeColumn, relativeTraceSecFractionDigits, roundRelativeSec, toRelativeTraceSecDisplay } from './traceRelativeTime';
+import { isAbsoluteTraceTimeColumn, relativeTraceSecFractionDigits, toRelativeTraceSecDisplay } from './traceRelativeTime';
 import type { PluginDefinition } from '../types';
 
 export const PROCESS_LIST_TABLE_KEYS = ['pid', 'name', 'process', 'uid', 'status', 'window_start_sec', 'window_end_sec'] as const;
-export const THREAD_DETAIL_TABLE_KEYS = ['tid', 'name', 'upid', 'process', 'is_main_thread', 'start_ts', 'end_ts'] as const;
 
 export const PROCESS_LIST_EXTRA_KEY_ORDER = [
   'upid',
@@ -13,16 +12,6 @@ export const PROCESS_LIST_EXTRA_KEY_ORDER = [
   'active_in_window_sec',
   'start_ts_sec',
   'end_ts_sec',
-];
-
-export const THREAD_DETAIL_EXTRA_KEY_ORDER = [
-  'utid',
-  'process_pid',
-  'process_uid',
-  'process_cmdline',
-  'process_parent_upid',
-  'process_android_appid',
-  'process_arg_set_id',
 ];
 
 function getResultColumnWidth(key: string): number {
@@ -42,21 +31,6 @@ function getProcessListColumnWidth(key: string): number {
   if (key === 'window_start_sec' || key === 'window_end_sec' || key === 'start_ts_sec' || key === 'end_ts_sec') return 120;
   if (key === 'uid' || key === 'pid') return 88;
   return 100;
-}
-
-function getThreadDetailColumnWidth(key: string): number {
-  if (key === 'name' || key === 'process') return 170;
-  if (key === 'start_ts' || key === 'end_ts') return 120;
-  if (key === 'is_main_thread') return 110;
-  if (key === 'tid' || key === 'upid') return 88;
-  return 100;
-}
-
-function formatThreadRelativeSecFromNs(value: unknown, traceStartSec: number): string {
-  if (value === null || value === undefined || value === '') return '';
-  const ns = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(ns)) return String(value);
-  return roundRelativeSec(ns / 1e9 - traceStartSec, 3).toFixed(3);
 }
 
 export function formatDetailValue(key: string, value: unknown, traceStartSec: number): string {
@@ -97,31 +71,6 @@ export function buildTablePresentation(
       render: isAbsoluteTraceTimeColumn(k)
         ? (v: unknown) => toRelativeTraceSecDisplay(v, traceStartSec, relativeTraceSecFractionDigits(k))
         : undefined,
-    }));
-    return { tableColumns: cols, tableScrollX: scrollX };
-  }
-
-  if (activePluginId === 'thread-detail') {
-    const keys = (THREAD_DETAIL_TABLE_KEYS as readonly string[]).filter((k) =>
-      Object.prototype.hasOwnProperty.call(row0, k),
-    );
-    const scrollX = Math.max(640, keys.reduce((acc, k) => acc + getThreadDetailColumnWidth(k), 0));
-    const cols = keys.map((k) => ({
-      title: k,
-      dataIndex: k,
-      key: k,
-      width: getThreadDetailColumnWidth(k),
-      ellipsis: true as const,
-      render: (k === 'start_ts' || k === 'end_ts')
-        ? (v: unknown) => formatThreadRelativeSecFromNs(v, traceStartSec)
-        : isAbsoluteTraceTimeColumn(k)
-          ? (v: unknown) => toRelativeTraceSecDisplay(v, traceStartSec, relativeTraceSecFractionDigits(k))
-          : k === 'is_main_thread'
-            ? (v: unknown) => {
-              const n = typeof v === 'number' ? v : Number(v);
-              return Number.isFinite(n) ? (n ? '1 (main)' : '0') : String(v ?? '');
-            }
-            : undefined,
     }));
     return { tableColumns: cols, tableScrollX: scrollX };
   }

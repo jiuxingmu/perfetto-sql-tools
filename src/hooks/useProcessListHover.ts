@@ -39,7 +39,7 @@ export function useProcessListHover({ activePluginId }: UseProcessListHoverArgs)
   useEffect(() => () => cancelHide(), []);
 
   const processListTableOnRow = (
-    activePluginId === 'process-list' || activePluginId === 'thread-detail'
+    activePluginId === 'process-list'
   )
     ? (record: Record<string, unknown>): RowMouseHandler => ({
         onMouseEnter: (event) => {

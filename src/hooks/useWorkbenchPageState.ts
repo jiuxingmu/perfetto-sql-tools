@@ -39,6 +39,7 @@ export function useWorkbenchPageState() {
     globalProcess,
     isEventAggregate: activePlugin.id === 'event-aggregate',
     isThreadTrend: activePlugin.id === 'thread-trend',
+    isThreadOverview: activePlugin.id === 'thread-overview',
     isThreadBlocked: activePlugin.id === 'thread-blocked',
     isCpuUsageAnalysis: activePlugin.id === 'cpu-usage-analysis',
     isMainThreadJankAnalysis: activePlugin.id === 'main-thread-jank-analysis',

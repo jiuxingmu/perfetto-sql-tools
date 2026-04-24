@@ -3,11 +3,11 @@ import type { PluginDefinition, QueryParams } from '../types';
 
 export const PLUGIN_DISPLAY_ORDER: PluginDefinition['id'][] = [
   'process-list',
-  'thread-detail',
+  'thread-overview',
+  'thread-trend',
   'cpu-usage-analysis',
   'main-thread-jank-analysis',
   'wait-reason-analysis',
-  'thread-trend',
   'thread-blocked',
   'event-aggregate',
 ];
@@ -46,6 +46,12 @@ export function createParamsByPlugin(defaultEndSec: number): Record<PluginDefini
     }
     if (plugin.id === 'main-thread-jank-analysis' || plugin.id === 'wait-reason-analysis') {
       return [plugin.id, { ...base, onlyMainThread: 1 }];
+    }
+    if (plugin.id === 'thread-trend') {
+      return [plugin.id, { ...base, bucketMs: 1000, topN: 10 }];
+    }
+    if (plugin.id === 'thread-overview') {
+      return [plugin.id, { ...base, onlyMainThread: 0, topN: 20, sortBy: 'cpu_time' }];
     }
     return [plugin.id, base];
   })) as Record<PluginDefinition['id'], QueryParams>;

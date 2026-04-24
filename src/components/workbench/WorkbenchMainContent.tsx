@@ -57,6 +57,7 @@ export function WorkbenchMainContent({
           activeResult,
           blockedSuspiciousRuleText: resultView.blockedSuspiciousRuleText,
           listSummaryText: resultView.listSummaryText,
+          pluginGuidanceText: resultView.pluginGuidanceText,
           lineOption: resultView.lineOption,
           tableColumns: resultView.tableColumns,
           tableScrollX: resultView.tableScrollX,

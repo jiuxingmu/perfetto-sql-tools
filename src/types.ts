@@ -15,9 +15,9 @@ export type TraceDataset = {
 
 export type PluginId =
   | 'thread-trend'
+  | 'thread-overview'
   | 'event-aggregate'
   | 'process-list'
-  | 'thread-detail'
   | 'thread-blocked'
   | 'cpu-usage-analysis'
   | 'main-thread-jank-analysis'
@@ -39,7 +39,7 @@ export type QueryParams = {
   blockedThresholdMs?: number;
   waitTypeFilter?: '' | 'io' | 'lock' | 'binder' | 'futex' | 'workqueue' | 'schedule';
   statLevel?: 'process' | 'thread';
-  sortBy?: 'cpu_time' | 'thread_count' | 'active_duration';
+  sortBy?: 'cpu_time' | 'thread_count' | 'active_duration' | 'switch_count' | 'wakeup_count';
   onlyActive?: number;
   uid?: number;
   statusFilter?: '' | 'running' | 'ended';

@@ -48,17 +48,12 @@ export function useResultViewModel({
   }, [activeResult?.rows, traceStartSec]);
 
   const listSummaryText = useMemo(() => {
-    if (activePlugin.id !== 'process-list' && activePlugin.id !== 'thread-detail') return null;
+    if (activePlugin.id !== 'process-list') return null;
     if (!activeResult) return null;
 
     const processName = globalProcess || activeParams.process || '全部进程';
-    const threadName = activePlugin.id === 'thread-detail' ? (activeParams.thread || '全部线程') : '';
     const timeRangeText = `${activeParams.startSec.toFixed(3)}s ~ ${activeParams.endSec.toFixed(3)}s`;
     const resultCount = activeResult.rows.length;
-
-    if (activePlugin.id === 'thread-detail') {
-      return `筛选条件：时间=${timeRangeText}，进程=${processName}，线程=${threadName}；共计 ${resultCount} 条结果。`;
-    }
     return `筛选条件：时间=${timeRangeText}，进程=${processName}；共计 ${resultCount} 条结果。`;
   }, [
     activePlugin.id,
@@ -66,7 +61,6 @@ export function useResultViewModel({
     activeParams.endSec,
     activeParams.process,
     activeParams.startSec,
-    activeParams.thread,
     globalProcess,
   ]);
 
@@ -77,6 +71,19 @@ export function useResultViewModel({
     }
     return '完整输出口径：展示主线程全部 blocked/sleeping 事件（不做时长过滤），用于全量排查。';
   }, [activePlugin.id, activeParams.suspiciousOnly]);
+
+  const pluginGuidanceText = useMemo(() => {
+    if (activePlugin.id === 'main-thread-jank-analysis') {
+      return '定位说明：该插件用于识别“哪里卡了”（慢帧/卡顿区间）；若要分析“为什么在等”，请继续查看「等待原因归因分析」。';
+    }
+    if (activePlugin.id === 'wait-reason-analysis') {
+      return '定位说明：该插件用于解释“为什么在等”（IO/锁/Binder/futex 等）；若要确认主线程是否出现可疑阻塞证据，请查看「主线程阻塞分析」。';
+    }
+    if (activePlugin.id === 'thread-blocked') {
+      return '定位说明：该插件用于验证主线程阻塞证据（blocked 状态、时长、waker）；若要看卡顿现象，请查看「主线程卡顿分析」。';
+    }
+    return null;
+  }, [activePlugin.id]);
 
   const tableRowKey = (record: Record<string, unknown>, index?: number) => {
     const rowIndex = index ?? 0;
@@ -91,6 +98,7 @@ export function useResultViewModel({
     rawRowsJson,
     listSummaryText,
     blockedSuspiciousRuleText,
+    pluginGuidanceText,
     tableRowKey,
   };
 }

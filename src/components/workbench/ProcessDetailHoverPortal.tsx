@@ -5,8 +5,6 @@ import {
   formatDetailValue,
   PROCESS_LIST_EXTRA_KEY_ORDER,
   PROCESS_LIST_TABLE_KEYS,
-  THREAD_DETAIL_EXTRA_KEY_ORDER,
-  THREAD_DETAIL_TABLE_KEYS,
 } from '../../lib/resultPresentation';
 
 type HoverState = {
@@ -30,7 +28,7 @@ export function ProcessDetailHoverPortal({
   onMouseEnter,
   onMouseLeave,
 }: ProcessDetailHoverPortalProps) {
-  if (!hover || (activePluginId !== 'process-list' && activePluginId !== 'thread-detail')) {
+  if (!hover || activePluginId !== 'process-list') {
     return null;
   }
 
@@ -41,12 +39,8 @@ export function ProcessDetailHoverPortal({
   const left = Math.max(8, Math.min(hover.x, vw - panelW - 8));
   const top = Math.max(8, Math.min(hover.y, vh - panelH - 8));
 
-  const mainTableKeys = activePluginId === 'process-list'
-    ? (PROCESS_LIST_TABLE_KEYS as readonly string[])
-    : (THREAD_DETAIL_TABLE_KEYS as readonly string[]);
-  const extraOrder = activePluginId === 'process-list'
-    ? PROCESS_LIST_EXTRA_KEY_ORDER
-    : THREAD_DETAIL_EXTRA_KEY_ORDER;
+  const mainTableKeys = PROCESS_LIST_TABLE_KEYS as readonly string[];
+  const extraOrder = PROCESS_LIST_EXTRA_KEY_ORDER;
 
   const extraRows = Object.entries(hover.record)
     .filter(([k]) => !mainTableKeys.includes(k))

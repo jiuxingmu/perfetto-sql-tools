@@ -72,6 +72,7 @@ export function buildPluginSpecificParamFields({
   activeParams,
   isEventAggregate,
   isThreadTrend,
+  isThreadOverview,
   isThreadBlocked,
   isCpuUsageAnalysis,
   isMainThreadJankAnalysis,
@@ -81,6 +82,7 @@ export function buildPluginSpecificParamFields({
 }: Pick<SharedArgs, 'activeParams' | 'setActiveParams'> & {
   isEventAggregate: boolean;
   isThreadTrend: boolean;
+  isThreadOverview: boolean;
   isThreadBlocked: boolean;
   isCpuUsageAnalysis: boolean;
   isMainThreadJankAnalysis: boolean;
@@ -127,9 +129,106 @@ export function buildPluginSpecificParamFields({
       control: (
         <Input
           type="number"
-          value={activeParams.bucketMs}
-          onChange={(e) => setActiveParams((p) => ({ ...p, bucketMs: Number(e.target.value) }))}
+          min={1}
+          value={activeParams.bucketMs ?? 1000}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, bucketMs: Number.isFinite(value) ? value : 1000 }));
+          }}
         />
+      ),
+    },
+    {
+      key: 'threadTopN',
+      label: 'Top N',
+      visible: isThreadOverview,
+      control: (
+        <Input
+          type="number"
+          min={1}
+          max={200}
+          value={activeParams.topN ?? 20}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, topN: Number.isFinite(value) ? value : 20 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'threadPid',
+      label: 'PID(可选)',
+      visible: isThreadOverview,
+      control: (
+        <Input
+          type="number"
+          placeholder="不填表示全部"
+          value={activeParams.pid}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, pid: Number.isFinite(value) ? value : undefined }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'threadTid',
+      label: 'TID(可选)',
+      visible: isThreadOverview,
+      control: (
+        <Input
+          type="number"
+          placeholder="不填表示全部"
+          value={activeParams.tid}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, tid: Number.isFinite(value) ? value : undefined }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'threadSortBy',
+      label: '排序字段',
+      visible: isThreadOverview,
+      control: (
+        <Select
+          style={{ width: '100%' }}
+          value={activeParams.sortBy ?? 'cpu_time'}
+          onChange={(v) => setActiveParams((p) => ({ ...p, sortBy: v as QueryParams['sortBy'] }))}
+          options={[
+            { label: 'CPU 时间', value: 'cpu_time' },
+            { label: '活跃时长', value: 'active_duration' },
+            { label: '切换次数', value: 'switch_count' },
+            { label: '唤醒次数', value: 'wakeup_count' },
+          ]}
+        />
+      ),
+    },
+    {
+      key: 'threadOnlyActive',
+      label: '仅活跃线程',
+      visible: isThreadOverview,
+      control: (
+        <div className="param-switch-wrap">
+          <Switch
+            checked={(activeParams.onlyActive ?? 1) === 1}
+            onChange={(checked) => setActiveParams((p) => ({ ...p, onlyActive: checked ? 1 : 0 }))}
+          />
+        </div>
+      ),
+    },
+    {
+      key: 'threadOnlyMain',
+      label: '仅主线程',
+      visible: isThreadOverview,
+      control: (
+        <div className="param-switch-wrap">
+          <Switch
+            checked={(activeParams.onlyMainThread ?? 0) === 1}
+            onChange={(checked) => setActiveParams((p) => ({ ...p, onlyMainThread: checked ? 1 : 0 }))}
+          />
+        </div>
       ),
     },
     {

@@ -8,6 +8,7 @@ type UseParamFieldsArgs = {
   globalProcess: string;
   isEventAggregate: boolean;
   isThreadTrend: boolean;
+  isThreadOverview: boolean;
   isThreadBlocked: boolean;
   isCpuUsageAnalysis: boolean;
   isMainThreadJankAnalysis: boolean;
@@ -23,6 +24,7 @@ export function useParamFields({
   globalProcess,
   isEventAggregate,
   isThreadTrend,
+  isThreadOverview,
   isThreadBlocked,
   isCpuUsageAnalysis,
   isMainThreadJankAnalysis,
@@ -44,6 +46,7 @@ export function useParamFields({
         activeParams,
         isEventAggregate,
         isThreadTrend,
+        isThreadOverview,
         isThreadBlocked,
         isCpuUsageAnalysis,
         isMainThreadJankAnalysis,
@@ -64,6 +67,7 @@ export function useParamFields({
     isWaitReasonAnalysis,
     isProcessListOverview,
     isThreadTrend,
+    isThreadOverview,
     processOptions,
     setActiveParams,
     traceDurationSec,

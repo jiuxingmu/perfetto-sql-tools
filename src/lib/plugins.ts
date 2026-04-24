@@ -4,7 +4,7 @@ export const PLUGINS: PluginDefinition[] = [
   {
     id: 'wait-reason-analysis',
     name: '等待原因归因分析',
-    description: '识别阻塞片段并归因等待类型',
+    description: '解释为什么在等（IO/锁/Binder/futex 等）',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -108,7 +108,7 @@ LIMIT 5000;`,
   {
     id: 'main-thread-jank-analysis',
     name: '主线程卡顿分析',
-    description: '识别主线程慢帧与卡顿区间',
+    description: '定位哪里卡了（慢帧与卡顿区间）',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -332,6 +332,111 @@ FROM bucketed
 ORDER BY bucket_idx;`,
   },
   {
+    id: 'thread-overview',
+    name: '线程画像总览',
+    description: '线程级性能画像与筛选入口',
+    outputType: 'table',
+    sqlTemplate: `WITH params AS (
+  SELECT
+    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
+    CAST({{endSec}} * 1e9 AS INT) AS end_ns,
+    CAST(MAX(1, {{topN}}) AS INT) AS top_n,
+    CAST(MAX(0, {{onlyActive}}) AS INT) AS only_active,
+    CAST(MAX(0, {{onlyMainThread}}) AS INT) AS only_main_thread,
+    CAST({{pid}} AS INT) AS target_pid,
+    CAST({{tid}} AS INT) AS target_tid
+),
+thread_scope AS (
+  SELECT
+    t.utid,
+    t.tid,
+    COALESCE(t.name, printf('tid_%d', t.tid)) AS thread_name,
+    COALESCE(t.is_main_thread, CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END) AS is_main_thread,
+    COALESCE(t.start_ts, 0) AS start_ts,
+    COALESCE(t.end_ts, 9223372036854775807) AS end_ts,
+    p.upid,
+    p.pid,
+    COALESCE(p.name, printf('pid_%d', p.pid)) AS process_name
+  FROM thread t
+  LEFT JOIN process p ON t.upid = p.upid
+  JOIN params x
+  WHERE t.utid IS NOT NULL
+    AND ('{{process}}' = '' OR COALESCE(p.name, '') = '{{process}}')
+    AND COALESCE(t.name, '') LIKE '%{{thread}}%'
+    AND (x.target_pid <= 0 OR COALESCE(p.pid, -1) = x.target_pid)
+    AND (x.target_tid <= 0 OR COALESCE(t.tid, -1) = x.target_tid)
+    AND (x.only_main_thread = 0 OR COALESCE(t.is_main_thread, CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END) = 1)
+),
+thread_profile AS (
+  SELECT
+    ts.*,
+    ROUND((MAX(ts.start_ts, x.start_ns)) / 1e9, 3) AS window_start_ts,
+    ROUND((MIN(ts.end_ts, x.end_ns)) / 1e9, 3) AS window_end_ts,
+    ROUND(MAX(0, MIN(ts.end_ts, x.end_ns) - MAX(ts.start_ts, x.start_ns)) / 1e6, 3) AS active_duration_ms
+  FROM thread_scope ts
+  JOIN params x
+),
+cpu_agg AS (
+  SELECT
+    t.utid,
+    ROUND(SUM(MAX(0, MIN(s.ts + COALESCE(s.dur, 0), x.end_ns) - MAX(s.ts, x.start_ns))) / 1e6, 3) AS cpu_time_ms,
+    COUNT(1) AS switch_count
+  FROM sched s
+  JOIN thread t ON s.utid = t.utid
+  JOIN params x
+  WHERE s.ts < x.end_ns
+    AND (s.ts + COALESCE(s.dur, 0)) > x.start_ns
+  GROUP BY t.utid
+),
+wakeup_agg AS (
+  SELECT
+    ts.utid,
+    SUM(CASE WHEN ts.waker_utid IS NOT NULL THEN 1 ELSE 0 END) AS wakeup_count
+  FROM thread_state ts
+  JOIN params x
+  WHERE ts.ts < x.end_ns
+    AND (ts.ts + COALESCE(ts.dur, 0)) > x.start_ns
+  GROUP BY ts.utid
+),
+combined AS (
+  SELECT
+    tp.thread_name,
+    tp.tid,
+    tp.pid,
+    tp.process_name,
+    tp.is_main_thread,
+    tp.window_start_ts,
+    tp.window_end_ts,
+    tp.active_duration_ms,
+    COALESCE(ca.cpu_time_ms, 0) AS cpu_time_ms,
+    COALESCE(ca.switch_count, 0) AS switch_count,
+    COALESCE(wa.wakeup_count, 0) AS wakeup_count,
+    CASE
+      WHEN LOWER(tp.thread_name) = 'main' OR tp.is_main_thread = 1 THEN 'main'
+      WHEN LOWER(tp.thread_name) LIKE '%binder%' THEN 'binder'
+      WHEN LOWER(tp.thread_name) LIKE '%render%' THEN 'render'
+      WHEN LOWER(tp.thread_name) LIKE '%io%' THEN 'io'
+      WHEN LOWER(tp.thread_name) LIKE '%net%' THEN 'network'
+      WHEN LOWER(tp.thread_name) LIKE '%worker%' THEN 'worker'
+      ELSE 'unknown'
+    END AS thread_type,
+    CASE
+      WHEN tp.is_main_thread = 1 THEN '查看主线程卡顿分析'
+      WHEN COALESCE(ca.cpu_time_ms, 0) > 0 THEN '查看 CPU 占用分析'
+      WHEN COALESCE(wa.wakeup_count, 0) > 0 THEN '查看等待原因归因分析'
+      ELSE '查看线程画像总览'
+    END AS next_step
+  FROM thread_profile tp
+  LEFT JOIN cpu_agg ca ON tp.utid = ca.utid
+  LEFT JOIN wakeup_agg wa ON tp.utid = wa.utid
+)
+SELECT *
+FROM combined c
+WHERE ((SELECT only_active FROM params) = 0 OR c.active_duration_ms > 0 OR c.cpu_time_ms > 0)
+ORDER BY {{threadOrderBy}}
+LIMIT (SELECT top_n FROM params);`,
+  },
+  {
     id: 'event-aggregate',
     name: '事件耗时聚合',
     description: '统计事件总耗时/均值/次数',
@@ -467,7 +572,7 @@ scored AS (
     *,
     CASE
       WHEN cpu_time_ms > 0 THEN '查看 CPU 占用分析'
-      WHEN thread_count >= 60 THEN '查看线程信息列表'
+      WHEN thread_count >= 60 THEN '查看线程画像总览'
       ELSE '查看主线程卡顿分析'
     END AS next_step
   FROM process_profile
@@ -483,44 +588,9 @@ ORDER BY {{processOrderBy}}
 LIMIT (SELECT top_n FROM params);`,
   },
   {
-    id: 'thread-detail',
-    name: '线程信息列表',
-    description: '时间范围内的线程明细',
-    outputType: 'table',
-    sqlTemplate: `WITH params AS (
-  SELECT
-    CAST({{startSec}} * 1e9 AS INT) AS start_ns,
-    CAST({{endSec}} * 1e9 AS INT) AS end_ns
-)
-SELECT
-  t.tid,
-  COALESCE(t.name, printf('tid_%d', t.tid)) AS name,
-  t.upid,
-  COALESCE(p.name, printf('pid_%d', p.pid)) AS process,
-  COALESCE(t.is_main_thread, 0) AS is_main_thread,
-  t.start_ts AS start_ts,
-  t.end_ts AS end_ts,
-  t.utid,
-  p.pid AS process_pid,
-  p.uid AS process_uid,
-  COALESCE(p.cmdline, '') AS process_cmdline,
-  p.parent_upid AS process_parent_upid,
-  p.android_appid AS process_android_appid,
-  p.arg_set_id AS process_arg_set_id
-FROM thread t
-JOIN params ts
-LEFT JOIN process p ON t.upid = p.upid
-WHERE COALESCE(t.start_ts, 0) <= ts.end_ns
-  AND COALESCE(t.end_ts, ts.end_ns) >= ts.start_ns
-  AND COALESCE(p.name, '') LIKE '%{{process}}%'
-  AND COALESCE(t.name, '') LIKE '%{{thread}}%'
-ORDER BY t.upid ASC, t.tid ASC
-LIMIT 5000;`,
-  },
-  {
     id: 'thread-blocked',
     name: '主线程阻塞分析',
-    description: '分析主线程阻塞与唤醒',
+    description: '验证主线程阻塞证据与唤醒链路',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -641,6 +711,19 @@ export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
         return 's.active_in_window_sec DESC, s.cpu_time_ms DESC, s.thread_count DESC, s.upid ASC';
     }
   })();
+  const threadOrderBy = (() => {
+    switch (p.sortBy) {
+      case 'active_duration':
+        return 'c.active_duration_ms DESC, c.cpu_time_ms DESC, c.tid ASC';
+      case 'switch_count':
+        return 'c.switch_count DESC, c.cpu_time_ms DESC, c.tid ASC';
+      case 'wakeup_count':
+        return 'c.wakeup_count DESC, c.cpu_time_ms DESC, c.tid ASC';
+      case 'cpu_time':
+      default:
+        return 'c.cpu_time_ms DESC, c.active_duration_ms DESC, c.tid ASC';
+    }
+  })();
 
   return def.sqlTemplate
     .replaceAll('{{startSec}}', String(p.startSec))
@@ -659,6 +742,7 @@ export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
     .replaceAll('{{statusFilter}}', p.statusFilter ?? '')
     .replaceAll('{{onlyActive}}', String(Math.max(0, Math.min(1, Number(p.onlyActive ?? 1)))))
     .replaceAll('{{processOrderBy}}', processOrderBy)
+    .replaceAll('{{threadOrderBy}}', threadOrderBy)
     .replaceAll('{{onlyMainThread}}', String(Math.max(0, Math.min(1, Number(p.onlyMainThread ?? 0)))))
     .replaceAll('{{statLevel}}', p.statLevel === 'process' ? 'process' : 'thread')
     .replaceAll('{{aggregateOrderBy}}', aggregateOrderBy)
@@ -675,6 +759,18 @@ function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): 
       { label: '均值', value: values.length ? (sum / values.length).toFixed(2) : 0 },
       { label: '最小值', value: values.length ? Math.min(...values) : 0 },
       { label: '样本点', value: values.length },
+    ];
+  }
+  if (plugin.id === 'thread-overview') {
+    const total = rows.length;
+    const active = rows.filter((r) => Number(r.active_duration_ms ?? 0) > 0 || Number(r.cpu_time_ms ?? 0) > 0).length;
+    const mainCount = rows.filter((r) => Number(r.is_main_thread ?? 0) === 1).length;
+    const cpuTop = rows.reduce((acc, r) => Math.max(acc, Number(r.cpu_time_ms ?? 0)), 0);
+    return [
+      { label: '线程总数', value: total },
+      { label: '活跃线程', value: active },
+      { label: '主线程数', value: mainCount },
+      { label: 'Top CPU(ms)', value: Number(cpuTop.toFixed(3)) },
     ];
   }
   if (plugin.id === 'event-aggregate') {
