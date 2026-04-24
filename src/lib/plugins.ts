@@ -13,7 +13,7 @@ export const PLUGINS: PluginDefinition[] = [
   },
   {
     id: 'wait-reason-analysis',
-    name: '等待原因归因分析',
+    name: '等待归因分析',
     description: '解释为什么在等（IO/锁/Binder/futex 等）',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
@@ -433,7 +433,7 @@ combined AS (
     CASE
       WHEN tp.is_main_thread = 1 THEN '查看慢帧分析'
       WHEN COALESCE(ca.cpu_time_ms, 0) > 0 THEN '查看热点线程分析'
-      WHEN COALESCE(wa.wakeup_count, 0) > 0 THEN '查看等待原因归因分析'
+      WHEN COALESCE(wa.wakeup_count, 0) > 0 THEN '查看等待归因分析'
       ELSE '查看线程画像总览'
     END AS next_step
   FROM thread_profile tp
@@ -599,7 +599,7 @@ LIMIT (SELECT top_n FROM params);`,
   },
   {
     id: 'thread-blocked',
-    name: '主线程阻塞分析',
+    name: '主线程阻塞总览',
     description: '验证主线程阻塞证据与唤醒链路',
     outputType: 'table',
     sqlTemplate: `WITH params AS (

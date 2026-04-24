@@ -231,3 +231,49 @@
 .wait-selected-row > td {
   background: #f6ffed !important;
 }
+
+.plugin-sidebar-card {
+  border-radius: 12px;
+}
+
+.plugin-sidebar-card--active {
+  border-color: #1677ff !important;
+  box-shadow: 0 0 0 1px rgba(22, 119, 255, 0.18);
+}
+
+.plugin-sidebar-card .ant-card-body {
+  padding: 10px 12px !important;
+}
+
+.plugin-sidebar-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.plugin-sidebar-title {
+  min-width: 0;
+  font-size: 17px;
+}
+
+.plugin-sidebar-type-tag {
+  margin-inline-end: 0 !important;
+  flex-shrink: 0;
+}
+
+.plugin-sidebar-info-btn {
+  color: #64748b;
+}
+
+.plugin-sidebar-info-btn:hover {
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.08) !important;
+}
+
+.plugin-sidebar-desc {
+  display: block;
+  font-size: 12px;
+  line-height: 1.35;
+}
