@@ -37,6 +37,9 @@ export function useRunPluginQuery({
         process: globalProcess || activeParams.process,
         startSec: activeParams.startSec + traceStartSec,
         endSec: activeParams.endSec + traceStartSec,
+        // 与 startSec/endSec 一致：UI 为相对 trace 起点的秒数，SQL 需绝对时间戳（秒）
+        compareStartSec: (activeParams.compareStartSec ?? 0) + traceStartSec,
+        compareEndSec: (activeParams.compareEndSec ?? 0) + traceStartSec,
       };
       const r = await runPluginQuery(activePlugin, absParams);
       setResultByPlugin((prev) => ({ ...prev, [activePluginId]: r }));

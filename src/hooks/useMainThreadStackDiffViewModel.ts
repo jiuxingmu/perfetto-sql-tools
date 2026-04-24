@@ -47,6 +47,11 @@ function normalizeRows(rows: Record<string, unknown>[]): StackDiffRow[] {
   });
 }
 
+function rowHasNonTrivialDelta(row: StackDiffRow): boolean {
+  const eps = 1e-6;
+  return Math.abs(row.costDeltaMs) > eps || row.callsDelta !== 0 || Math.abs(row.avgDeltaMs) > eps;
+}
+
 export function useMainThreadStackDiffViewModel(activeResult: QueryResult | null) {
   const rows = useMemo(() => normalizeRows(activeResult?.rows ?? []), [activeResult?.rows]);
 
@@ -56,10 +61,26 @@ export function useMainThreadStackDiffViewModel(activeResult: QueryResult | null
     const addedCount = rows.filter((row) => row.changeType === '新增').length;
     const removedCount = rows.filter((row) => row.changeType === '消失').length;
     const riskyCount = rows.filter((row) => row.riskLevel === '高风险' || row.riskLevel === '异常').length;
-    const top = rows[0];
-    const conclusion = top
-      ? `目标窗口较基线窗口总耗时变化 ${totalCostDelta.toFixed(3)}ms，最显著差异为 ${top.stackKey}（${top.changeType}，耗时增量 ${top.costDeltaMs.toFixed(3)}ms）。`
-      : '未发现显著差异。';
+    const hasMeaningfulRow = rows.some(rowHasNonTrivialDelta);
+    const topByMagnitude = hasMeaningfulRow
+      ? [...rows].sort(
+        (a, b) =>
+          Math.abs(b.costDeltaMs) - Math.abs(a.costDeltaMs)
+          || Math.abs(b.callsDelta) - Math.abs(a.callsDelta)
+          || Math.abs(b.avgDeltaMs) - Math.abs(a.avgDeltaMs),
+      )[0]
+      : null;
+
+    let conclusion: string;
+    if (!rows.length) {
+      conclusion = '当前筛选下无命中结果，可放宽「最小调用次数 / 最小耗时」或调整时间窗口。';
+    } else if (!hasMeaningfulRow) {
+      conclusion = `目标窗口与基线窗口在聚合结果上一致：总耗时变化 ${totalCostDelta.toFixed(3)}ms，总调用次数变化 ${totalCallDelta}；各调用链耗时与次数差均为 0，无离散差异。`;
+    } else if (topByMagnitude) {
+      conclusion = `目标窗口较基线窗口总耗时变化 ${totalCostDelta.toFixed(3)}ms；最显著差异为 ${topByMagnitude.stackKey}（${topByMagnitude.changeType}，耗时增量 ${topByMagnitude.costDeltaMs.toFixed(3)}ms，调用次数差 ${topByMagnitude.callsDelta}）。`;
+    } else {
+      conclusion = '对比完成，请结合明细表查看。';
+    }
     return {
       totalCallDelta,
       totalCostDelta,

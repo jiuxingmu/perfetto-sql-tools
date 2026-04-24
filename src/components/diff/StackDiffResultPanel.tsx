@@ -17,14 +17,14 @@ function exportCsv(rows: Record<string, unknown>[]) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'main-thread-stack-diff-analysis.csv';
+  a.download = 'thread-stack-diff-analysis.csv';
   a.click();
   URL.revokeObjectURL(url);
 }
 
 export function StackDiffResultPanel({ activeResult }: StackDiffResultPanelProps) {
   const { rows, summary } = useMainThreadStackDiffViewModel(activeResult);
-  if (!rows.length) return <Empty description="暂无可比较的主线程堆栈差异" />;
+  if (!rows.length) return <Empty description="暂无可比较的线程堆栈差异" />;
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>

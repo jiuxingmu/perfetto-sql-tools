@@ -3,8 +3,8 @@ import type { PluginDefinition, QueryParams, QueryResult } from '../types';
 export const PLUGINS: PluginDefinition[] = [
   {
     id: 'main-thread-stack-diff-analysis',
-    name: '主线程堆栈 Diff 分析',
-    description: '对比基线/目标窗口主线程调用链差异，定位劣化热点',
+    name: '线程堆栈 Diff 分析',
+    description: '对比基线/目标窗口线程 slice 调用链差异，可限定主线程，定位劣化热点',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -138,7 +138,8 @@ SELECT
     WHEN d.calls_b = 0 AND d.calls_a > 0 THEN '消失'
     WHEN d.cost_delta_ns > 0 THEN '增强'
     WHEN d.cost_delta_ns < 0 THEN '减少'
-    ELSE '结构变化'
+    WHEN d.calls_delta != 0 THEN '结构变化'
+    ELSE '一致'
   END AS change_type,
   CASE
     WHEN d.cost_delta_ns >= 20 * 1e6 OR d.calls_delta >= 30 THEN '高风险'
@@ -942,7 +943,7 @@ function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): 
     ];
   }
   // cpu-usage-analysis、thread-overview、main-thread-jank-analysis、wait-reason-analysis、
-  // main-thread-stack-diff-analysis：摘要由各 *ResultPanel 内展示
+  // main-thread-stack-diff-analysis（线程堆栈 Diff）：摘要由各 *ResultPanel 内展示
   return undefined;
 }
 
