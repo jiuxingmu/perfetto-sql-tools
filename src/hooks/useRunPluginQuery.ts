@@ -11,6 +11,8 @@ type UseRunPluginQueryArgs = {
   activeParams: QueryParams;
   globalProcess: string;
   traceStartSec: number;
+  baselineDataset: TraceDataset | null;
+  baselineTraceStartSec: number;
   setResultByPlugin: Dispatch<SetStateAction<Partial<Record<PluginDefinition['id'], QueryResult>>>>;
 };
 
@@ -21,6 +23,8 @@ export function useRunPluginQuery({
   activeParams,
   globalProcess,
   traceStartSec,
+  baselineDataset,
+  baselineTraceStartSec,
   setResultByPlugin,
 }: UseRunPluginQueryArgs) {
   const [running, setRunning] = useState(false);
@@ -30,16 +34,23 @@ export function useRunPluginQuery({
       message.warning('请先导入 trace 文件');
       return;
     }
+    const isDualStackDiff =
+      activePluginId === 'main-thread-stack-diff-analysis'
+      && (activeParams.stackDiffMode ?? 'single-trace') === 'dual-trace';
+    if (isDualStackDiff && !baselineDataset) {
+      message.warning('双 trace 模式请先导入基线 trace 文件');
+      return;
+    }
     setRunning(true);
     try {
+      const compareOffset = isDualStackDiff ? baselineTraceStartSec : traceStartSec;
       const absParams: QueryParams = {
         ...activeParams,
         process: globalProcess || activeParams.process,
         startSec: activeParams.startSec + traceStartSec,
         endSec: activeParams.endSec + traceStartSec,
-        // 与 startSec/endSec 一致：UI 为相对 trace 起点的秒数，SQL 需绝对时间戳（秒）
-        compareStartSec: (activeParams.compareStartSec ?? 0) + traceStartSec,
-        compareEndSec: (activeParams.compareEndSec ?? 0) + traceStartSec,
+        compareStartSec: (activeParams.compareStartSec ?? 0) + compareOffset,
+        compareEndSec: (activeParams.compareEndSec ?? 0) + compareOffset,
       };
       const r = await runPluginQuery(activePlugin, absParams);
       setResultByPlugin((prev) => ({ ...prev, [activePluginId]: r }));

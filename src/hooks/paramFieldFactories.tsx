@@ -93,6 +93,22 @@ export function buildPluginSpecificParamFields({
 }): ParamFieldDraft[] {
   return [
     {
+      key: 'stackDiffMode',
+      label: '对比模式',
+      visible: isMainThreadStackDiffAnalysis,
+      control: (
+        <Select
+          style={{ width: '100%' }}
+          value={activeParams.stackDiffMode ?? 'single-trace'}
+          onChange={(v) => setActiveParams((p) => ({ ...p, stackDiffMode: v as QueryParams['stackDiffMode'] }))}
+          options={[
+            { label: '单 trace 双窗口', value: 'single-trace' },
+            { label: '双 trace（基线文件）', value: 'dual-trace' },
+          ]}
+        />
+      ),
+    },
+    {
       key: 'diffCompareStartSec',
       label: '基线开始(s)',
       visible: isMainThreadStackDiffAnalysis,

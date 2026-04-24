@@ -55,6 +55,8 @@ type UseTraceImportArgs = {
   setGlobalProcess: (value: string) => void;
   setResultByPlugin: (value: Partial<Record<PluginDefinition['id'], QueryResult>>) => void;
   setParamsByPlugin: (value: Record<PluginDefinition['id'], QueryParams>) => void;
+  /** 主 trace 导入成功后调用（例如清除双 trace 基线状态） */
+  onAfterPrimaryImport?: () => void | Promise<void>;
 };
 
 export function useTraceImport({
@@ -63,6 +65,7 @@ export function useTraceImport({
   setGlobalProcess,
   setResultByPlugin,
   setParamsByPlugin,
+  onAfterPrimaryImport,
 }: UseTraceImportArgs) {
   const [loading, setLoading] = useState(false);
 
@@ -95,6 +98,7 @@ export function useTraceImport({
           content: smartHint,
           duration: 5,
         });
+        await onAfterPrimaryImport?.();
       } catch (err) {
         const text = err instanceof Error ? err.message : String(err);
         const hint = text.includes('Failed to fetch') || text.includes('ECONNREFUSED')
@@ -106,7 +110,7 @@ export function useTraceImport({
       }
       return false;
     },
-  }), [createParamsByPlugin, setDataset, setGlobalProcess, setParamsByPlugin, setResultByPlugin]);
+  }), [createParamsByPlugin, onAfterPrimaryImport, setDataset, setGlobalProcess, setParamsByPlugin, setResultByPlugin]);
 
   return { loading, uploadProps };
 }

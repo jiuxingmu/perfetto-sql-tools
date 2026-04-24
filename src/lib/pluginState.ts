@@ -42,6 +42,7 @@ export function createDefaultParams(defaultEndSec: number): QueryParams {
     diffMinCostMs: 0.1,
     diffTopN: 30,
     diffSortBy: 'cost_delta',
+    stackDiffMode: 'single-trace',
   };
 }
 

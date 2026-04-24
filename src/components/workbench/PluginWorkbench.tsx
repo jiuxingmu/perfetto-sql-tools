@@ -1,3 +1,4 @@
+import { Button, Card, Space, Typography, Upload } from 'antd';
 import { WorkbenchMainContent } from './WorkbenchMainContent';
 import { WorkbenchOverlays } from './WorkbenchOverlays';
 import { WorkbenchShell } from './WorkbenchShell';
@@ -15,12 +16,45 @@ export function PluginWorkbench() {
     workspace,
     paramFields,
     traceImport,
+    baselineDataset,
+    baselineImport,
     runState,
     trendDiff,
     resultView,
     hoverState,
   } = state;
-  const { activePlugin, activePluginId, setActivePluginId, orderedPlugins, activeResult } = workspace;
+  const { activePlugin, activePluginId, setActivePluginId, orderedPlugins, activeResult, activeParams } = workspace;
+
+  const pluginExtras = activePlugin.id === 'main-thread-stack-diff-analysis'
+    && (activeParams.stackDiffMode ?? 'single-trace') === 'dual-trace'
+    ? (
+      <Card size="small" title="双 Trace：基线文件">
+        <Space wrap align="center">
+          <Upload {...baselineImport.uploadProps}>
+            <Button loading={baselineImport.loading}>导入基线 Trace</Button>
+          </Upload>
+          {baselineDataset ? (
+            <>
+              <Typography.Text type="secondary">
+                当前基线：
+                <Typography.Text strong>{baselineDataset.summary.traceName}</Typography.Text>
+                {' '}
+                （时长约
+                {Math.max(0, baselineDataset.summary.timeRange[1] - baselineDataset.summary.timeRange[0]).toFixed(2)}
+                s）
+              </Typography.Text>
+              <Button size="small" onClick={() => void baselineImport.clearBaseline()}>清除基线</Button>
+            </>
+          ) : (
+            <Typography.Text type="secondary">尚未加载基线文件</Typography.Text>
+          )}
+        </Space>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 8 }}>
+          目标窗口使用主 trace；基线开始/结束为相对基线文件起点。重新导入主 trace 时会清除基线。
+        </Typography.Paragraph>
+      </Card>
+    )
+    : null;
 
   return (
     <>
@@ -40,6 +74,7 @@ export function PluginWorkbench() {
       >
         <WorkbenchMainContent
           dataset={dataset}
+          pluginExtras={pluginExtras}
           traceDurationSec={traceDurationSec}
           activePluginId={activePlugin.id}
           activePluginName={activePlugin.name}

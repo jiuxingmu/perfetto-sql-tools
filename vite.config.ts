@@ -12,4 +12,13 @@ export default defineConfig({
       },
     },
   },
+  // 与 dev 一致：preview 时把 /api 转到本机 Node，否则会 404「Cannot POST …」
+  preview: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
+  },
 })

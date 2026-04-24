@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useBaselineTraceImport } from './useBaselineTraceImport';
 import { useParamFields } from './useParamFields';
 import { usePluginWorkspace } from './usePluginWorkspace';
 import { useProcessListHover } from './useProcessListHover';
@@ -11,11 +12,13 @@ import type { TraceDataset } from '../types';
 
 export function useWorkbenchPageState() {
   const [dataset, setDataset] = useState<TraceDataset | null>(null);
+  const [baselineDataset, setBaselineDataset] = useState<TraceDataset | null>(null);
   const [globalProcess, setGlobalProcess] = useState('');
 
   const traceStartSec = dataset?.summary.timeRange[0] ?? 0;
   const traceEndSec = dataset?.summary.timeRange[1] ?? 0;
   const traceDurationSec = Math.max(0, traceEndSec - traceStartSec);
+  const baselineTraceStartSec = baselineDataset?.summary.timeRange[0] ?? 0;
 
   const workspace = usePluginWorkspace({ traceDurationSec });
   const {
@@ -50,12 +53,22 @@ export function useWorkbenchPageState() {
     setActiveParams,
   });
 
+  const baselineImport = useBaselineTraceImport({ setBaselineDataset });
+
   const traceImport = useTraceImport({
     createParamsByPlugin,
     setDataset,
     setGlobalProcess,
     setResultByPlugin,
     setParamsByPlugin,
+    onAfterPrimaryImport: async () => {
+      try {
+        await fetch('/api/trace/baseline', { method: 'DELETE' });
+      } catch {
+        // ignore
+      }
+      setBaselineDataset(null);
+    },
   });
 
   const runState = useRunPluginQuery({
@@ -65,6 +78,8 @@ export function useWorkbenchPageState() {
     activeParams,
     globalProcess,
     traceStartSec,
+    baselineDataset,
+    baselineTraceStartSec,
     setResultByPlugin,
   });
 
@@ -89,6 +104,7 @@ export function useWorkbenchPageState() {
 
   return {
     dataset,
+    baselineDataset,
     globalProcess,
     setGlobalProcess,
     traceStartSec,
@@ -97,6 +113,7 @@ export function useWorkbenchPageState() {
     workspace,
     paramFields,
     traceImport,
+    baselineImport,
     runState,
     trendDiff,
     resultView,

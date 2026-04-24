@@ -52,6 +52,8 @@ export type QueryParams = {
   diffMinCostMs?: number;
   diffTopN?: number;
   diffSortBy?: 'cost_delta' | 'calls_delta' | 'avg_delta';
+  /** 单 trace 两窗口均查主库；双 trace 时基线侧查 baseline 库 */
+  stackDiffMode?: 'single-trace' | 'dual-trace';
 };
 
 export type PluginDefinition = {

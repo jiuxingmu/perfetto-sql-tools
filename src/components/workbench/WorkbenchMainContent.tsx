@@ -8,10 +8,12 @@ import type {
   TrendCompareProps,
   TrendDiffSummaryProps,
 } from './WorkbenchTypes';
+import type { ReactNode } from 'react';
 import type { PluginDefinition, QueryResult, TraceDataset } from '../../types';
 
 type WorkbenchMainContentProps = {
   dataset: TraceDataset | null;
+  pluginExtras?: ReactNode;
   traceDurationSec: number;
   activePluginId: PluginDefinition['id'];
   activePluginName: string;
@@ -26,6 +28,7 @@ type WorkbenchMainContentProps = {
 
 export function WorkbenchMainContent({
   dataset,
+  pluginExtras,
   traceDurationSec,
   activePluginId,
   activePluginName,
@@ -40,6 +43,8 @@ export function WorkbenchMainContent({
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={16}>
       <TraceOverview dataset={dataset} traceDurationSec={traceDurationSec} />
+
+      {pluginExtras}
 
       <ParamsCard
         config={{
