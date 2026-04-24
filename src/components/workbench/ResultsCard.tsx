@@ -22,7 +22,6 @@ export function ResultsCard({
       <ResultSummaryTexts
         blockedSuspiciousRuleText={view.blockedSuspiciousRuleText}
         listSummaryText={view.listSummaryText}
-        pluginGuidanceText={view.pluginGuidanceText}
       />
 
       <ResultTabs

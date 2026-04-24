@@ -14,7 +14,6 @@ export type ResultViewProps = {
   activeResult: QueryResult | null;
   blockedSuspiciousRuleText: string | null;
   listSummaryText: string | null;
-  pluginGuidanceText: string | null;
   lineOption: Record<string, unknown> | null;
   tableColumns: Array<Record<string, unknown>>;
   tableScrollX: number;

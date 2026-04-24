@@ -107,7 +107,7 @@ LIMIT 5000;`,
   },
   {
     id: 'main-thread-jank-analysis',
-    name: '主线程卡顿分析',
+    name: '慢帧分析',
     description: '定位哪里卡了（慢帧与卡顿区间）',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
@@ -421,7 +421,7 @@ combined AS (
       ELSE 'unknown'
     END AS thread_type,
     CASE
-      WHEN tp.is_main_thread = 1 THEN '查看主线程卡顿分析'
+      WHEN tp.is_main_thread = 1 THEN '查看慢帧分析'
       WHEN COALESCE(ca.cpu_time_ms, 0) > 0 THEN '查看 CPU 占用分析'
       WHEN COALESCE(wa.wakeup_count, 0) > 0 THEN '查看等待原因归因分析'
       ELSE '查看线程画像总览'
@@ -573,7 +573,7 @@ scored AS (
     CASE
       WHEN cpu_time_ms > 0 THEN '查看 CPU 占用分析'
       WHEN thread_count >= 60 THEN '查看线程画像总览'
-      ELSE '查看主线程卡顿分析'
+      ELSE '查看慢帧分析'
     END AS next_step
   FROM process_profile
 )
