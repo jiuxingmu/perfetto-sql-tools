@@ -21,7 +21,7 @@ function downloadRowsAsCsv(rows: Record<string, unknown>[]) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = 'cpu-usage-analysis.csv';
+  anchor.download = 'hot-thread-analysis.csv';
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -35,7 +35,7 @@ export function CpuResultPanel({ activeResult }: CpuResultPanelProps) {
     [rows, selectedKey],
   );
 
-  if (!rows.length) return <Empty description="暂无 CPU 占用数据" />;
+  if (!rows.length) return <Empty description="暂无热点线程数据" />;
 
   return (
     <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -48,7 +48,7 @@ export function CpuResultPanel({ activeResult }: CpuResultPanelProps) {
 
       <Card
         size="small"
-        title="CPU Top N 图表"
+        title="热点 Top N 图表"
         extra={(
           <Typography.Text type="secondary">
             统计粒度：{summary.statLevel === 'process' ? '进程' : '线程'}
@@ -60,7 +60,7 @@ export function CpuResultPanel({ activeResult }: CpuResultPanelProps) {
 
       <Card
         size="small"
-        title="CPU 明细表"
+        title="热点明细表"
         extra={<Button size="small" onClick={() => downloadRowsAsCsv(activeResult?.rows ?? [])}>导出结果</Button>}
       >
         <CpuDetailTable rows={rows} selectedKey={selectedValidKey} onSelect={setSelectedKey} />

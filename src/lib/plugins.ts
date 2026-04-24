@@ -348,8 +348,8 @@ LIMIT 5000;`,
   },
   {
     id: 'cpu-usage-analysis',
-    name: 'CPU 占用分析',
-    description: '分析进程/线程 CPU 热点及占比',
+    name: '热点线程分析',
+    description: '识别进程/线程 CPU 热点、占比与调度片段特征',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -574,7 +574,7 @@ combined AS (
     END AS thread_type,
     CASE
       WHEN tp.is_main_thread = 1 THEN '查看慢帧分析'
-      WHEN COALESCE(ca.cpu_time_ms, 0) > 0 THEN '查看 CPU 占用分析'
+      WHEN COALESCE(ca.cpu_time_ms, 0) > 0 THEN '查看热点线程分析'
       WHEN COALESCE(wa.wakeup_count, 0) > 0 THEN '查看等待原因归因分析'
       ELSE '查看线程画像总览'
     END AS next_step
@@ -723,7 +723,7 @@ scored AS (
   SELECT
     *,
     CASE
-      WHEN cpu_time_ms > 0 THEN '查看 CPU 占用分析'
+      WHEN cpu_time_ms > 0 THEN '查看热点线程分析'
       WHEN thread_count >= 60 THEN '查看线程画像总览'
       ELSE '查看慢帧分析'
     END AS next_step
@@ -920,6 +920,7 @@ export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
 }
 
 function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): QueryResult['stats'] {
+  // 有专用可视化面板的插件不在此生成 stats，避免与 ResultsCard / ResultStatsRow 重复展示摘要
   if (plugin.id === 'thread-trend') {
     const values = rows.map((r) => Number(r.thread_count ?? 0));
     const sum = values.reduce((acc, n) => acc + n, 0);
@@ -928,18 +929,6 @@ function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): 
       { label: '均值', value: values.length ? (sum / values.length).toFixed(2) : 0 },
       { label: '最小值', value: values.length ? Math.min(...values) : 0 },
       { label: '样本点', value: values.length },
-    ];
-  }
-  if (plugin.id === 'thread-overview') {
-    const total = rows.length;
-    const active = rows.filter((r) => Number(r.active_duration_ms ?? 0) > 0 || Number(r.cpu_time_ms ?? 0) > 0).length;
-    const mainCount = rows.filter((r) => Number(r.is_main_thread ?? 0) === 1).length;
-    const cpuTop = rows.reduce((acc, r) => Math.max(acc, Number(r.cpu_time_ms ?? 0)), 0);
-    return [
-      { label: '线程总数', value: total },
-      { label: '活跃线程', value: active },
-      { label: '主线程数', value: mainCount },
-      { label: 'Top CPU(ms)', value: Number(cpuTop.toFixed(3)) },
     ];
   }
   if (plugin.id === 'event-aggregate') {
@@ -952,62 +941,8 @@ function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): 
       { label: '平均耗时(ms)', value: totalCount ? (totalDur / totalCount).toFixed(2) : 0 },
     ];
   }
-  if (plugin.id === 'cpu-usage-analysis') {
-    const totalCpuDur = rows.reduce((acc, r) => acc + Number(r.cpu_dur_ms ?? 0), 0);
-    const top = rows[0] as Record<string, unknown> | undefined;
-    const top10Ratio = rows.slice(0, 10).reduce((acc, r) => acc + Number(r.cpu_ratio ?? 0), 0);
-    const threadHotCount = rows.filter((r) => Number(r.cpu_ratio ?? 0) >= 0.05).length;
-    return [
-      { label: '总 CPU 时长(ms)', value: Number(totalCpuDur.toFixed(2)) },
-      { label: 'Top1', value: String(top?.name ?? '-') },
-      { label: '热点线程数', value: threadHotCount },
-      { label: 'Top10 占比', value: `${(top10Ratio * 100).toFixed(2)}%` },
-    ];
-  }
-  if (plugin.id === 'main-thread-jank-analysis') {
-    const total = rows.length;
-    const slowRows = rows.filter((r) => Number(r.slow_flag ?? 0) === 1);
-    const maxDur = rows.reduce((acc, r) => Math.max(acc, Number(r.frame_dur_ms ?? 0)), 0);
-    const avgDur = total ? rows.reduce((acc, r) => acc + Number(r.frame_dur_ms ?? 0), 0) / total : 0;
-    return [
-      { label: '总帧数', value: total },
-      { label: '慢帧数', value: slowRows.length },
-      { label: '慢帧占比', value: total ? `${((slowRows.length / total) * 100).toFixed(2)}%` : '0%' },
-      { label: '最大帧耗时(ms)', value: Number(maxDur.toFixed(3)) },
-      { label: '平均帧耗时(ms)', value: Number(avgDur.toFixed(3)) },
-    ];
-  }
-  if (plugin.id === 'wait-reason-analysis') {
-    const totalDur = rows.reduce((acc, row) => acc + Number(row.blocked_dur_ms ?? 0), 0);
-    const totalCount = rows.length;
-    const maxDur = rows.reduce((acc, row) => Math.max(acc, Number(row.blocked_dur_ms ?? 0)), 0);
-    const byType = rows.reduce<Record<string, number>>((acc, row) => {
-      const key = String(row.wait_type ?? 'unknown');
-      acc[key] = (acc[key] ?? 0) + Number(row.blocked_dur_ms ?? 0);
-      return acc;
-    }, {});
-    const mainType = Object.entries(byType).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '-';
-    return [
-      { label: '总等待时长(ms)', value: Number(totalDur.toFixed(2)) },
-      { label: '等待次数', value: totalCount },
-      { label: '最长等待时长(ms)', value: Number(maxDur.toFixed(3)) },
-      { label: '主要等待类型', value: mainType },
-      { label: '等待类型数', value: Object.keys(byType).length },
-    ];
-  }
-  if (plugin.id === 'main-thread-stack-diff-analysis') {
-    const totalCallDelta = rows.reduce((acc, row) => acc + Number(row.calls_delta ?? 0), 0);
-    const totalCostDelta = rows.reduce((acc, row) => acc + Number(row.cost_delta_ms ?? 0), 0);
-    const added = rows.filter((row) => String(row.change_type ?? '') === '新增').length;
-    const risky = rows.filter((row) => String(row.risk_level ?? '') === '高风险').length;
-    return [
-      { label: '差异调用链', value: rows.length },
-      { label: '新增调用链', value: added },
-      { label: '总调用增量', value: totalCallDelta },
-      { label: '总耗时增量(ms)', value: Number(totalCostDelta.toFixed(3)) },
-      { label: '高风险项', value: risky },
-    ];
-  }
+  // cpu-usage-analysis、thread-overview、main-thread-jank-analysis、wait-reason-analysis、
+  // main-thread-stack-diff-analysis：摘要由各 *ResultPanel 内展示
   return undefined;
 }
 
