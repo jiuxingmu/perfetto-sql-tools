@@ -42,7 +42,7 @@ export function createDefaultParams(defaultEndSec: number): QueryParams {
     diffMinCostMs: 0.1,
     diffTopN: 30,
     diffSortBy: 'cost_delta',
-    stackDiffMode: 'single-trace',
+    stackDiffMode: 'dual-trace',
   };
 }
 
@@ -65,6 +65,7 @@ export function createParamsByPlugin(defaultEndSec: number): Record<PluginDefini
       return [plugin.id, {
         ...base,
         onlyMainThread: 1,
+        stackDiffMode: 'dual-trace',
         diffSortBy: 'cost_delta',
         diffTopN: 30,
         diffMinCalls: 1,
