@@ -6,6 +6,7 @@ export const PLUGIN_DISPLAY_ORDER: PluginDefinition['id'][] = [
   'thread-overview',
   'thread-trend',
   'cpu-usage-analysis',
+  'main-thread-stack-diff-analysis',
   'main-thread-jank-analysis',
   'wait-reason-analysis',
   'thread-blocked',
@@ -35,6 +36,12 @@ export function createDefaultParams(defaultEndSec: number): QueryParams {
     keyword: '',
     suspiciousOnly: 1,
     aggregateOrder: 'avg_desc',
+    compareStartSec: 0,
+    compareEndSec: Math.min(defaultEndSec, 5),
+    diffMinCalls: 1,
+    diffMinCostMs: 0.1,
+    diffTopN: 30,
+    diffSortBy: 'cost_delta',
   };
 }
 
@@ -52,6 +59,18 @@ export function createParamsByPlugin(defaultEndSec: number): Record<PluginDefini
     }
     if (plugin.id === 'thread-overview') {
       return [plugin.id, { ...base, onlyMainThread: 0, topN: 20, sortBy: 'cpu_time' }];
+    }
+    if (plugin.id === 'main-thread-stack-diff-analysis') {
+      return [plugin.id, {
+        ...base,
+        onlyMainThread: 1,
+        diffSortBy: 'cost_delta',
+        diffTopN: 30,
+        diffMinCalls: 1,
+        diffMinCostMs: 0.1,
+        compareStartSec: base.startSec,
+        compareEndSec: Math.min(base.endSec, base.startSec + Math.max(1, (base.endSec - base.startSec) / 2)),
+      }];
     }
     return [plugin.id, base];
   })) as Record<PluginDefinition['id'], QueryParams>;

@@ -21,7 +21,8 @@ export type PluginId =
   | 'thread-blocked'
   | 'cpu-usage-analysis'
   | 'main-thread-jank-analysis'
-  | 'wait-reason-analysis';
+  | 'wait-reason-analysis'
+  | 'main-thread-stack-diff-analysis';
 
 export type QueryParams = {
   startSec: number;
@@ -45,6 +46,12 @@ export type QueryParams = {
   statusFilter?: '' | 'running' | 'ended';
   suspiciousOnly?: number;
   aggregateOrder?: 'avg_desc' | 'total_desc' | 'count_desc';
+  compareStartSec?: number;
+  compareEndSec?: number;
+  diffMinCalls?: number;
+  diffMinCostMs?: number;
+  diffTopN?: number;
+  diffSortBy?: 'cost_delta' | 'calls_delta' | 'avg_delta';
 };
 
 export type PluginDefinition = {

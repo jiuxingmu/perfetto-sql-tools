@@ -2,6 +2,158 @@ import type { PluginDefinition, QueryParams, QueryResult } from '../types';
 
 export const PLUGINS: PluginDefinition[] = [
   {
+    id: 'main-thread-stack-diff-analysis',
+    name: '主线程堆栈 Diff 分析',
+    description: '对比基线/目标窗口主线程调用链差异，定位劣化热点',
+    outputType: 'table',
+    sqlTemplate: `WITH params AS (
+  SELECT
+    CAST({{startSec}} * 1e9 AS INT) AS target_start_ns,
+    CAST({{endSec}} * 1e9 AS INT) AS target_end_ns,
+    CAST({{compareStartSec}} * 1e9 AS INT) AS base_start_ns,
+    CAST({{compareEndSec}} * 1e9 AS INT) AS base_end_ns,
+    CAST({{pid}} AS INT) AS target_pid,
+    CAST({{tid}} AS INT) AS target_tid,
+    CAST(MAX(0, {{onlyMainThread}}) AS INT) AS only_main_thread,
+    CAST(MAX(0, {{diffMinCalls}}) AS INT) AS min_calls,
+    CAST(MAX(0, {{diffMinCostMs}} * 1e6) AS INT) AS min_cost_ns,
+    CAST(MAX(1, {{diffTopN}}) AS INT) AS top_n
+),
+trace_window AS (
+  SELECT start_ts AS trace_start_ns
+  FROM trace_bounds
+  LIMIT 1
+),
+thread_scope AS (
+  SELECT
+    t.utid,
+    t.tid,
+    COALESCE(t.name, printf('tid_%d', t.tid)) AS thread_name,
+    COALESCE(t.is_main_thread, CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END) AS is_main_thread,
+    p.pid,
+    COALESCE(p.name, printf('pid_%d', p.pid)) AS process_name
+  FROM thread t
+  LEFT JOIN process p ON p.upid = t.upid
+  JOIN params x
+  WHERE ('{{process}}' = '' OR COALESCE(p.name, '') = '{{process}}')
+    AND ('{{thread}}' = '' OR COALESCE(t.name, '') LIKE '%' || '{{thread}}' || '%')
+    AND (x.target_pid <= 0 OR COALESCE(p.pid, -1) = x.target_pid)
+    AND (x.target_tid <= 0 OR COALESCE(t.tid, -1) = x.target_tid)
+    AND (x.only_main_thread = 0 OR COALESCE(t.is_main_thread, CASE WHEN COALESCE(t.name, '') = 'main' THEN 1 ELSE 0 END) = 1)
+),
+slice_events AS (
+  SELECT
+    sl.ts,
+    sl.ts + COALESCE(sl.dur, 0) AS end_ts,
+    COALESCE(sl.dur, 0) AS dur_ns,
+    COALESCE(sl.name, '') AS stack_key,
+    ts.process_name,
+    ts.thread_name,
+    ts.pid,
+    ts.tid
+  FROM slice sl
+  JOIN thread_track tt ON sl.track_id = tt.id
+  JOIN thread_scope ts ON tt.utid = ts.utid
+  WHERE COALESCE(sl.dur, 0) > 0
+    AND COALESCE(sl.name, '') <> ''
+),
+base_agg AS (
+  SELECT
+    se.stack_key,
+    COUNT(1) AS calls_a,
+    SUM(se.dur_ns) AS cost_ns_a
+  FROM slice_events se
+  JOIN params x
+  WHERE se.ts < x.base_end_ns
+    AND se.end_ts > x.base_start_ns
+  GROUP BY se.stack_key
+),
+target_agg AS (
+  SELECT
+    se.stack_key,
+    MAX(se.process_name) AS process_name,
+    MAX(se.thread_name) AS thread_name,
+    MAX(se.pid) AS pid,
+    MAX(se.tid) AS tid,
+    COUNT(1) AS calls_b,
+    SUM(se.dur_ns) AS cost_ns_b
+  FROM slice_events se
+  JOIN params x
+  WHERE se.ts < x.target_end_ns
+    AND se.end_ts > x.target_start_ns
+  GROUP BY se.stack_key
+),
+diffs AS (
+  SELECT
+    COALESCE(t.stack_key, b.stack_key) AS stack_key,
+    COALESCE(t.process_name, '{{process}}') AS process_name,
+    COALESCE(t.thread_name, '{{thread}}') AS thread_name,
+    COALESCE(t.pid, 0) AS pid,
+    COALESCE(t.tid, 0) AS tid,
+    COALESCE(b.calls_a, 0) AS calls_a,
+    COALESCE(t.calls_b, 0) AS calls_b,
+    COALESCE(t.calls_b, 0) - COALESCE(b.calls_a, 0) AS calls_delta,
+    COALESCE(b.cost_ns_a, 0) AS cost_ns_a,
+    COALESCE(t.cost_ns_b, 0) AS cost_ns_b,
+    COALESCE(t.cost_ns_b, 0) - COALESCE(b.cost_ns_a, 0) AS cost_delta_ns
+  FROM base_agg b
+  LEFT JOIN target_agg t ON t.stack_key = b.stack_key
+  UNION ALL
+  SELECT
+    t.stack_key,
+    t.process_name,
+    t.thread_name,
+    t.pid,
+    t.tid,
+    0 AS calls_a,
+    t.calls_b,
+    t.calls_b AS calls_delta,
+    0 AS cost_ns_a,
+    t.cost_ns_b AS cost_ns_b,
+    t.cost_ns_b AS cost_delta_ns
+  FROM target_agg t
+  LEFT JOIN base_agg b ON b.stack_key = t.stack_key
+  WHERE b.stack_key IS NULL
+)
+SELECT
+  d.stack_key,
+  d.process_name,
+  d.thread_name,
+  d.pid,
+  d.tid,
+  d.calls_a,
+  d.calls_b,
+  d.calls_delta,
+  ROUND(d.cost_ns_a / 1e6, 3) AS cost_a_ms,
+  ROUND(d.cost_ns_b / 1e6, 3) AS cost_b_ms,
+  ROUND(d.cost_delta_ns / 1e6, 3) AS cost_delta_ms,
+  ROUND(CASE WHEN d.calls_a > 0 THEN (d.cost_ns_a / 1e6) / d.calls_a ELSE 0 END, 3) AS avg_cost_a_ms,
+  ROUND(CASE WHEN d.calls_b > 0 THEN (d.cost_ns_b / 1e6) / d.calls_b ELSE 0 END, 3) AS avg_cost_b_ms,
+  ROUND(
+    (CASE WHEN d.calls_b > 0 THEN (d.cost_ns_b / 1e6) / d.calls_b ELSE 0 END)
+    - (CASE WHEN d.calls_a > 0 THEN (d.cost_ns_a / 1e6) / d.calls_a ELSE 0 END), 3
+  ) AS avg_delta_ms,
+  CASE
+    WHEN d.calls_a = 0 AND d.calls_b > 0 THEN '新增'
+    WHEN d.calls_b = 0 AND d.calls_a > 0 THEN '消失'
+    WHEN d.cost_delta_ns > 0 THEN '增强'
+    WHEN d.cost_delta_ns < 0 THEN '减少'
+    ELSE '结构变化'
+  END AS change_type,
+  CASE
+    WHEN d.cost_delta_ns >= 20 * 1e6 OR d.calls_delta >= 30 THEN '高风险'
+    WHEN d.cost_delta_ns >= 8 * 1e6 OR d.calls_delta >= 10 THEN '异常'
+    WHEN d.cost_delta_ns > 0 OR d.calls_delta > 0 THEN '关注'
+    ELSE '正常'
+  END AS risk_level
+FROM diffs d
+JOIN params x
+WHERE (d.calls_a + d.calls_b) >= x.min_calls
+  AND MAX(d.cost_ns_a, d.cost_ns_b) >= x.min_cost_ns
+ORDER BY {{diffOrderBy}}
+LIMIT (SELECT top_n FROM params);`,
+  },
+  {
     id: 'wait-reason-analysis',
     name: '等待原因归因分析',
     description: '解释为什么在等（IO/锁/Binder/futex 等）',
@@ -724,6 +876,17 @@ export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
         return 'c.cpu_time_ms DESC, c.active_duration_ms DESC, c.tid ASC';
     }
   })();
+  const diffOrderBy = (() => {
+    switch (p.diffSortBy) {
+      case 'calls_delta':
+        return 'd.calls_delta DESC, d.cost_delta_ns DESC, d.stack_key ASC';
+      case 'avg_delta':
+        return 'avg_delta_ms DESC, d.cost_delta_ns DESC, d.stack_key ASC';
+      case 'cost_delta':
+      default:
+        return 'd.cost_delta_ns DESC, d.calls_delta DESC, d.stack_key ASC';
+    }
+  })();
 
   return def.sqlTemplate
     .replaceAll('{{startSec}}', String(p.startSec))
@@ -747,7 +910,13 @@ export function buildSqlPreview(def: PluginDefinition, p: QueryParams): string {
     .replaceAll('{{statLevel}}', p.statLevel === 'process' ? 'process' : 'thread')
     .replaceAll('{{aggregateOrderBy}}', aggregateOrderBy)
     .replaceAll('{{suspiciousOnly}}', String(Math.max(0, Math.min(1, Number(p.suspiciousOnly ?? 0)))))
-    .replaceAll('{{bucketMs}}', String(Math.max(1, p.bucketMs ?? 1000)));
+    .replaceAll('{{bucketMs}}', String(Math.max(1, p.bucketMs ?? 1000)))
+    .replaceAll('{{compareStartSec}}', String(Math.max(0, Number(p.compareStartSec ?? p.startSec))))
+    .replaceAll('{{compareEndSec}}', String(Math.max(0, Number(p.compareEndSec ?? p.endSec))))
+    .replaceAll('{{diffMinCalls}}', String(Math.max(0, Number(p.diffMinCalls ?? 1))))
+    .replaceAll('{{diffMinCostMs}}', String(Math.max(0, Number(p.diffMinCostMs ?? 0.1))))
+    .replaceAll('{{diffTopN}}', String(Math.max(1, Number(p.diffTopN ?? 30))))
+    .replaceAll('{{diffOrderBy}}', diffOrderBy);
 }
 
 function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): QueryResult['stats'] {
@@ -824,6 +993,19 @@ function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): 
       { label: '最长等待时长(ms)', value: Number(maxDur.toFixed(3)) },
       { label: '主要等待类型', value: mainType },
       { label: '等待类型数', value: Object.keys(byType).length },
+    ];
+  }
+  if (plugin.id === 'main-thread-stack-diff-analysis') {
+    const totalCallDelta = rows.reduce((acc, row) => acc + Number(row.calls_delta ?? 0), 0);
+    const totalCostDelta = rows.reduce((acc, row) => acc + Number(row.cost_delta_ms ?? 0), 0);
+    const added = rows.filter((row) => String(row.change_type ?? '') === '新增').length;
+    const risky = rows.filter((row) => String(row.risk_level ?? '') === '高风险').length;
+    return [
+      { label: '差异调用链', value: rows.length },
+      { label: '新增调用链', value: added },
+      { label: '总调用增量', value: totalCallDelta },
+      { label: '总耗时增量(ms)', value: Number(totalCostDelta.toFixed(3)) },
+      { label: '高风险项', value: risky },
     ];
   }
   return undefined;

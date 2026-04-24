@@ -5,6 +5,7 @@ import type { TableRowHoverHandler } from '../workbench/WorkbenchTypes';
 import { CpuResultPanel } from '../cpu';
 import { JankResultPanel } from '../jank';
 import { ProcessOverviewPanel } from '../process';
+import { StackDiffResultPanel } from '../diff';
 import { ThreadOverviewPanel } from '../thread';
 import { WaitResultPanel } from '../wait';
 
@@ -44,6 +45,9 @@ export function VisualizationPanel({
   }
   if (activePluginId === 'process-list') {
     return <ProcessOverviewPanel activeResult={activeResult} />;
+  }
+  if (activePluginId === 'main-thread-stack-diff-analysis') {
+    return <StackDiffResultPanel activeResult={activeResult} />;
   }
 
   return (

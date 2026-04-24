@@ -45,6 +45,7 @@ export function useWorkbenchPageState() {
     isMainThreadJankAnalysis: activePlugin.id === 'main-thread-jank-analysis',
     isWaitReasonAnalysis: activePlugin.id === 'wait-reason-analysis',
     isProcessListOverview: activePlugin.id === 'process-list',
+    isMainThreadStackDiffAnalysis: activePlugin.id === 'main-thread-stack-diff-analysis',
     traceDurationSec,
     setActiveParams,
   });

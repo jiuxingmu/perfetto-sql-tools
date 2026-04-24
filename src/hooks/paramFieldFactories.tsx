@@ -78,6 +78,7 @@ export function buildPluginSpecificParamFields({
   isMainThreadJankAnalysis,
   isWaitReasonAnalysis,
   isProcessListOverview,
+  isMainThreadStackDiffAnalysis,
   setActiveParams,
 }: Pick<SharedArgs, 'activeParams' | 'setActiveParams'> & {
   isEventAggregate: boolean;
@@ -88,8 +89,120 @@ export function buildPluginSpecificParamFields({
   isMainThreadJankAnalysis: boolean;
   isWaitReasonAnalysis: boolean;
   isProcessListOverview: boolean;
+  isMainThreadStackDiffAnalysis: boolean;
 }): ParamFieldDraft[] {
   return [
+    {
+      key: 'diffCompareStartSec',
+      label: '基线开始(s)',
+      visible: isMainThreadStackDiffAnalysis,
+      control: (
+        <Input
+          type="number"
+          min={0}
+          value={activeParams.compareStartSec ?? 0}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, compareStartSec: Number.isFinite(value) ? value : 0 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'diffCompareEndSec',
+      label: '基线结束(s)',
+      visible: isMainThreadStackDiffAnalysis,
+      control: (
+        <Input
+          type="number"
+          min={0}
+          value={activeParams.compareEndSec ?? 0}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, compareEndSec: Number.isFinite(value) ? value : 0 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'diffTopN',
+      label: 'Diff Top N',
+      visible: isMainThreadStackDiffAnalysis,
+      control: (
+        <Input
+          type="number"
+          min={1}
+          max={200}
+          value={activeParams.diffTopN ?? 30}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, diffTopN: Number.isFinite(value) ? value : 30 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'diffSortBy',
+      label: '排序方式',
+      visible: isMainThreadStackDiffAnalysis,
+      control: (
+        <Select
+          style={{ width: '100%' }}
+          value={activeParams.diffSortBy ?? 'cost_delta'}
+          onChange={(v) => setActiveParams((p) => ({ ...p, diffSortBy: v as QueryParams['diffSortBy'] }))}
+          options={[
+            { label: '总耗时增量', value: 'cost_delta' },
+            { label: '调用次数增量', value: 'calls_delta' },
+            { label: '平均耗时增量', value: 'avg_delta' },
+          ]}
+        />
+      ),
+    },
+    {
+      key: 'diffMinCalls',
+      label: '最小调用次数',
+      visible: isMainThreadStackDiffAnalysis,
+      control: (
+        <Input
+          type="number"
+          min={0}
+          value={activeParams.diffMinCalls ?? 1}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, diffMinCalls: Number.isFinite(value) ? value : 1 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'diffMinCostMs',
+      label: '最小耗时(ms)',
+      visible: isMainThreadStackDiffAnalysis,
+      control: (
+        <Input
+          type="number"
+          min={0}
+          value={activeParams.diffMinCostMs ?? 0.1}
+          onChange={(e) => {
+            const value = Number(e.target.value);
+            setActiveParams((p) => ({ ...p, diffMinCostMs: Number.isFinite(value) ? value : 0.1 }));
+          }}
+        />
+      ),
+    },
+    {
+      key: 'diffOnlyMainThread',
+      label: '仅主线程',
+      visible: isMainThreadStackDiffAnalysis,
+      control: (
+        <div className="param-switch-wrap">
+          <Switch
+            checked={(activeParams.onlyMainThread ?? 1) === 1}
+            onChange={(checked) => setActiveParams((p) => ({ ...p, onlyMainThread: checked ? 1 : 0 }))}
+          />
+        </div>
+      ),
+    },
     {
       key: 'keyword',
       label: '事件关键字',
