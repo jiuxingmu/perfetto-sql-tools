@@ -39,7 +39,6 @@ export function PluginSidebar({ orderedPlugins, activePluginId, onSelectPlugin }
                     {p.name}
                   </Typography.Text>
                   <Space size={6} align="center">
-                    <Tag color="blue" className="plugin-sidebar-type-tag">{p.outputType}</Tag>
                     <Tooltip title="查看插件说明（功能、原理、参数口径、计算流程）">
                       <Button
                         type="text"
@@ -52,6 +51,7 @@ export function PluginSidebar({ orderedPlugins, activePluginId, onSelectPlugin }
                         }}
                       />
                     </Tooltip>
+                    <Tag color="blue" className="plugin-sidebar-type-tag">{p.outputType}</Tag>
                   </Space>
                 </div>
                 <Typography.Text type="secondary" ellipsis={{ tooltip: p.description }} className="plugin-sidebar-desc">

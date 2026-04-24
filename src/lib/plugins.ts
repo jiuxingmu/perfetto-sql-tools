@@ -6,7 +6,7 @@ export const PLUGINS: PluginDefinition[] = [
   {
     id: 'main-thread-stack-diff-analysis',
     name: '线程堆栈 Diff 分析',
-    description: '单 trace 双窗口或双 trace 文件对比 slice 调用链，可限定主线程',
+    description: '对比线程调用链差异并定位劣化',
     outputType: 'table',
     sqlTemplate:
       'SELECT 1 AS _stack_diff_placeholder WHERE 0; -- 实际查询由双侧聚合 SQL 在运行时拼接',
@@ -14,7 +14,7 @@ export const PLUGINS: PluginDefinition[] = [
   {
     id: 'wait-reason-analysis',
     name: '等待归因分析',
-    description: '解释为什么在等（IO/锁/Binder/futex 等）',
+    description: '识别等待类型并定位等待来源',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -118,7 +118,7 @@ LIMIT 5000;`,
   {
     id: 'main-thread-jank-analysis',
     name: '慢帧分析',
-    description: '定位哪里卡了（慢帧与卡顿区间）',
+    description: '定位慢帧区间并评估卡顿程度',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -207,7 +207,7 @@ LIMIT 5000;`,
   {
     id: 'cpu-usage-analysis',
     name: '热点线程分析',
-    description: '识别进程/线程 CPU 热点、占比与调度片段特征',
+    description: '识别线程热点并输出占比变化',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -344,7 +344,7 @@ ORDER BY bucket_idx;`,
   {
     id: 'thread-overview',
     name: '线程画像总览',
-    description: '线程级性能画像与筛选入口',
+    description: '输出线程画像并提供筛选入口',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -470,7 +470,7 @@ LIMIT 1000;`,
   {
     id: 'process-list',
     name: '进程画像总览',
-    description: '时间范围内的进程风险画像与分析入口',
+    description: '输出进程画像并指引后续分析',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
@@ -600,7 +600,7 @@ LIMIT (SELECT top_n FROM params);`,
   {
     id: 'thread-blocked',
     name: '主线程阻塞总览',
-    description: '验证主线程阻塞证据与唤醒链路',
+    description: '总览主线程阻塞事件与唤醒链路',
     outputType: 'table',
     sqlTemplate: `WITH params AS (
   SELECT
