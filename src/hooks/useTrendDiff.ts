@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { message } from 'antd';
+import { apiUrl } from '../lib/api';
 import { roundRelativeSec } from '../lib/traceRelativeTime';
 import { buildTrendDiffSql } from '../lib/trendDiffSql';
 import type { PluginDefinition, QueryParams, QueryResult } from '../types';
@@ -53,7 +54,7 @@ export function useTrendDiff({
     setTrendDiffRunning(true);
     setTrendDiffCompared(false);
     try {
-      const resp = await fetch('/api/query', {
+      const resp = await fetch(apiUrl('/query'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql }),

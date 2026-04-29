@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { UploadProps } from 'antd';
 import { message } from 'antd';
+import { apiUrl } from '../lib/api';
 import type { PluginDefinition, QueryParams, QueryResult, TraceDataset } from '../types';
 
 async function inferTopCpuProcessName(): Promise<string> {
@@ -38,7 +39,7 @@ FROM all_top
 WHERE NOT EXISTS (SELECT 1 FROM non_system_top)
 LIMIT 1;`;
 
-  const resp = await fetch('/api/query', {
+  const resp = await fetch(apiUrl('/query'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sql }),
@@ -77,7 +78,7 @@ export function useTraceImport({
       try {
         const form = new FormData();
         form.append('file', file);
-        const resp = await fetch('/api/trace/import', { method: 'POST', body: form });
+        const resp = await fetch(apiUrl('/trace/import'), { method: 'POST', body: form });
         if (!resp.ok) {
           throw new Error(await resp.text());
         }

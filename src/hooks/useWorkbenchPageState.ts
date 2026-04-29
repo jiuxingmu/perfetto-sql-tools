@@ -7,6 +7,7 @@ import { useResultViewModel } from './useResultViewModel';
 import { useRunPluginQuery } from './useRunPluginQuery';
 import { useTraceImport } from './useTraceImport';
 import { useTrendDiff } from './useTrendDiff';
+import { apiUrl } from '../lib/api';
 import { createParamsByPlugin } from '../lib/pluginState';
 import type { TraceDataset } from '../types';
 
@@ -63,7 +64,7 @@ export function useWorkbenchPageState() {
     setParamsByPlugin,
     onAfterPrimaryImport: async () => {
       try {
-        await fetch('/api/trace/baseline', { method: 'DELETE' });
+        await fetch(apiUrl('/trace/baseline'), { method: 'DELETE' });
       } catch {
         // ignore
       }

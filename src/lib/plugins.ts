@@ -1,4 +1,5 @@
 import type { PluginDefinition, QueryParams, QueryResult } from '../types';
+import { apiUrl } from './api';
 import { buildStackDiffAggSql } from './stackDiffAggSql';
 import { mergeStackDiffAggRows } from './stackDiffMerge';
 
@@ -810,7 +811,7 @@ function buildStats(plugin: PluginDefinition, rows: Record<string, unknown>[]): 
 }
 
 async function postQueryRows(sql: string, trace: 'primary' | 'baseline' = 'primary'): Promise<Record<string, unknown>[]> {
-  const resp = await fetch('/api/query', {
+  const resp = await fetch(apiUrl('/query'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sql, trace }),

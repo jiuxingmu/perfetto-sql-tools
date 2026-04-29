@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { UploadProps } from 'antd';
 import { message } from 'antd';
+import { apiUrl } from '../lib/api';
 import type { TraceDataset } from '../types';
 
 type UseBaselineTraceImportArgs = {
@@ -18,7 +19,7 @@ export function useBaselineTraceImport({ setBaselineDataset }: UseBaselineTraceI
       try {
         const form = new FormData();
         form.append('file', file);
-        const resp = await fetch('/api/trace/import-baseline', { method: 'POST', body: form });
+        const resp = await fetch(apiUrl('/trace/import-baseline'), { method: 'POST', body: form });
         if (!resp.ok) {
           const raw = await resp.text();
           if (raw.includes('Cannot POST') || raw.includes('<!DOCTYPE')) {
@@ -46,7 +47,7 @@ export function useBaselineTraceImport({ setBaselineDataset }: UseBaselineTraceI
 
   const clearBaseline = async () => {
     try {
-      await fetch('/api/trace/baseline', { method: 'DELETE' });
+      await fetch(apiUrl('/trace/baseline'), { method: 'DELETE' });
     } catch {
       // ignore network errors; still clear local state
     }
