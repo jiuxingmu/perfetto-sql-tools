@@ -2,12 +2,15 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import { WasmEngine } from '@lynx-js/trace-processor';
+import path from 'path';
 
 const app = express();
 const upload = multer();
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
+
+app.use(express.static(path.join(import.meta.dirname, '../dist')));
 
 /** @type {WasmEngine | null} */
 let primaryEngine = null;
@@ -171,6 +174,10 @@ app.post('/api/query', async (req, res) => {
   } catch (err) {
     res.status(500).send(`查询失败: ${String(err)}`);
   }
+});
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(import.meta.dirname, '../dist', 'index.html'));
 });
 
 const port = Number(process.env.PORT ?? 3001);
