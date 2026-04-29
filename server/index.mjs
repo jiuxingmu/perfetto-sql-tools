@@ -176,7 +176,7 @@ app.post('/api/query', async (req, res) => {
   }
 });
 
-app.get('*', (req, res) => {
+app.get(/.*/, (req, res) => {
   res.sendFile(path.join(import.meta.dirname, '../dist', 'index.html'));
 });
 
