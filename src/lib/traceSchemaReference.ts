@@ -1,5 +1,5 @@
 /**
- * 本项目中插件 SQL 实际用到的 Perfetto trace processor 表及常用字段说明。
+ * 本项目中插件 SQL 用到的 Perfetto trace processor 表，以及分析时常一并查阅的表。
  * 时间与时长在 trace DB 中多为纳秒（ns）；展示层可能换算为秒或毫秒。
  * 权威定义见 Perfetto 文档：https://perfetto.dev/docs/analysis/sql-tables
  */
@@ -120,6 +120,86 @@ export const TRACE_SCHEMA_TABLES: TraceTableDoc[] = [
     ],
     notes: [
       '部分 trace 中 thread_track 还有 name 等列；本项目 SQL 主要使用 id 与 utid。',
+    ],
+  },
+  {
+    name: 'cpu',
+    description: '逻辑 CPU（核心）维表；与调度片上的 ucpu 对应，用于把「第几颗核」还原成可读信息。',
+    usedInPlugins: '当前内置插件 SQL 未直接 JOIN；sched.ucpu 可关联 cpu.id 做核号、机型等扩展分析。',
+    columns: [
+      { name: 'id', type: 'CpuTable::Id', meaning: 'CPU 主键', valueRange: '与 sched.ucpu 一致' },
+      { name: 'cpu', type: 'uint32', meaning: '设备上 CPU 核心下标', valueRange: '通常从 0 起的无符号整数；可为 NULL' },
+      { name: 'cluster_id', type: 'uint32', meaning: '簇 id', valueRange: '同簇核心共享同一 cluster_id' },
+      { name: 'processor', type: 'string', meaning: '核心描述字符串', valueRange: '如厂商给出的 core 名称' },
+      { name: 'machine_id', type: 'MachineTable::Id', meaning: '远端机标识', valueRange: '单机 trace 多为默认机；可 join machine' },
+      { name: 'capacity', type: 'uint32', meaning: '相对算力标定（若采集）', valueRange: '可为 NULL；参见内核 CPU capacity 文档' },
+      { name: 'arg_set_id', type: 'uint32', meaning: '扩展参数集', valueRange: '可 join args；可为 NULL' },
+    ],
+  },
+  {
+    name: 'args',
+    description: '键值型扩展参数表；多类事件通过 arg_set_id 挂上同一套「扁平化」参数。',
+    usedInPlugins: '当前内置插件 SQL 未直接查询；slice/process 等表上的 arg_set_id 可关联此处做深度排查。',
+    columns: [
+      { name: 'id', type: 'ArgTable::Id', meaning: '参数行主键', valueRange: 'trace 内唯一' },
+      { name: 'arg_set_id', type: 'uint32', meaning: '参数集 id', valueRange: '与 slice.arg_set_id、sched 等表上字段对应' },
+      { name: 'flat_key', type: 'string', meaning: '扁平化后的完整 key', valueRange: '如 debug.deeplink 形式' },
+      { name: 'key', type: 'string', meaning: '短 key 名', valueRange: '与 flat_key 二选一语义见文档' },
+      { name: 'int_value', type: 'int64', meaning: '整型值', valueRange: '与 value_type 搭配；可为 NULL' },
+      { name: 'string_value', type: 'string', meaning: '字符串值', valueRange: '可为 NULL' },
+      { name: 'real_value', type: 'double', meaning: '浮点值', valueRange: '可为 NULL' },
+      { name: 'value_type', type: 'string', meaning: '本行值类型标记', valueRange: '如 int、string、real 等' },
+    ],
+  },
+  {
+    name: 'flow',
+    description: 'slice 之间的因果/流向边，用于表达「从哪段 slice 流向哪段 slice」（如 Binder、异步链）。',
+    usedInPlugins: '当前内置插件 SQL 未使用；做 slice 关联、调用链可视化时常与 slice 联查。',
+    columns: [
+      { name: 'id', type: 'FlowTable::Id', meaning: 'flow 行主键', valueRange: 'trace 内唯一' },
+      { name: 'slice_out', type: 'SliceTable::Id', meaning: '流出方 slice', valueRange: 'join slice.id' },
+      { name: 'slice_in', type: 'SliceTable::Id', meaning: '流入方 slice', valueRange: 'join slice.id' },
+      { name: 'trace_id', type: 'int64', meaning: '跨 slice 的流程 id（若采集）', valueRange: '可为 NULL；隐式推断的链可能无值' },
+      { name: 'arg_set_id', type: 'uint32', meaning: '附加参数集', valueRange: '可为 NULL' },
+    ],
+  },
+  {
+    name: 'cpu_freq',
+    description: '各逻辑 CPU 在采样时刻的运行频率，用于和 sched、功耗一起对照。',
+    usedInPlugins: '当前内置插件 SQL 未使用；做 CPU 频率、降频与卡顿关联分析时常查。',
+    columns: [
+      { name: 'id', type: 'CpuFreqTable::Id', meaning: '行主键', valueRange: 'trace 内唯一' },
+      { name: 'ucpu', type: 'CpuTable::Id', meaning: '逻辑 CPU', valueRange: 'join cpu.id' },
+      { name: 'freq', type: 'uint32', meaning: '该 ucpu 上的频率采样值', valueRange: '单位以数据源为准，常见为 kHz；详见 Perfetto 文档' },
+    ],
+    notes: [
+      '部分 trace 中频率随时间可能以 counter 等形式出现；若本表为空或列不一致，以 PRAGMA table_info(cpu_freq) 为准。',
+    ],
+  },
+  {
+    name: 'track',
+    description: '轨道维表：slice、counter 等通过 track_id 指向的「画在哪条轨道上」；thread_track 是其中一类线程轨道。',
+    usedInPlugins: '当前内置插件 SQL 主要直接用 thread_track；通用 slice 在完整 schema 中常 join track 取轨道名、层级。',
+    columns: [
+      { name: 'id', type: 'TrackTable::Id', meaning: '轨道主键', valueRange: '与 slice.track_id 对应（文档中亦见 __intrinsic_track）' },
+      { name: 'name', type: 'string', meaning: '轨道显示名', valueRange: '可为空' },
+      { name: 'parent_id', type: 'TrackTable::Id', meaning: '父轨道', valueRange: '根轨道时为 NULL' },
+    ],
+    notes: [
+      '完整 schema 中还可含 classification、machine_id、source_arg_set_id 等；以 Perfetto 文档与 PRAGMA table_info(track) 为准。',
+    ],
+  },
+  {
+    name: 'package_list',
+    description: '设备上已安装包元数据（需采集 android.packages_list 等数据源）。',
+    usedInPlugins: '当前内置插件 SQL 未使用；对照 uid、包名、是否可调试时常查。',
+    columns: [
+      { name: 'id', type: 'PackageListTable::Id', meaning: '行主键', valueRange: 'trace 内唯一' },
+      { name: 'package_name', type: 'string', meaning: '包名', valueRange: '如 com.example.app' },
+      { name: 'uid', type: 'int64', meaning: '该包进程使用的 uid', valueRange: '可与 process.uid 对照' },
+      { name: 'debuggable', type: 'int32', meaning: '是否可调试', valueRange: '布尔语义 0/1' },
+      { name: 'profileable_from_shell', type: 'int32', meaning: '是否可通过 shell profile', valueRange: '布尔语义 0/1' },
+      { name: 'version_code', type: 'int64', meaning: 'APK versionCode', valueRange: '整数' },
     ],
   },
 ];
