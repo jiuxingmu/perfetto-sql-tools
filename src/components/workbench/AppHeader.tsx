@@ -1,5 +1,6 @@
 import { Button, Layout, Select, Space, Typography, Upload } from 'antd';
 import type { UploadProps } from 'antd';
+import { Link } from 'react-router-dom';
 
 const { Header } = Layout;
 
@@ -20,7 +21,22 @@ export function AppHeader({
 }: AppHeaderProps) {
   return (
     <Header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0f172a' }}>
-      <Typography.Title level={4} style={{ color: '#fff', margin: 0 }}>Perfetto SQL 可视化工具</Typography.Title>
+      <Space size={16} align="center">
+        <Typography.Title level={4} style={{ color: '#fff', margin: 0 }}>
+          Perfetto SQL 可视化工具
+        </Typography.Title>
+        <Link
+          to="/schema"
+          style={{
+            color: '#94a3b8',
+            fontSize: 14,
+            whiteSpace: 'nowrap',
+            textDecoration: 'none',
+          }}
+        >
+          数据表与字段
+        </Link>
+      </Space>
       <Space size={10}>
         <Upload {...uploadProps}>
           <Button

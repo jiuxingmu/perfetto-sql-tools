@@ -823,7 +823,11 @@ async function postQueryRows(sql: string, trace: 'primary' | 'baseline' = 'prima
   return (await resp.json()) as Record<string, unknown>[];
 }
 
-export async function runPluginQuery(plugin: PluginDefinition, params: QueryParams): Promise<QueryResult> {
+export async function runPluginQuery(
+  plugin: PluginDefinition,
+  params: QueryParams,
+  previewParams: QueryParams,
+): Promise<QueryResult> {
   if (plugin.id === 'main-thread-stack-diff-analysis') {
     const mode = params.stackDiffMode ?? 'single-trace';
     const baseTrace: 'primary' | 'baseline' = mode === 'dual-trace' ? 'baseline' : 'primary';
@@ -839,18 +843,34 @@ export async function runPluginQuery(plugin: PluginDefinition, params: QueryPara
     ]);
     const rows = mergeStackDiffAggRows(rowsA, rowsB, params);
     const sqlPreview = `-- 基线侧（${baseTrace === 'baseline' ? '基线 trace' : '主 trace'}）\n${sqlBase}\n\n-- 目标侧（主 trace）\n${sqlTgt}`;
+    const sqlBaseRel = buildStackDiffAggSql(
+      previewParams,
+      Number(previewParams.compareStartSec ?? 0),
+      Number(previewParams.compareEndSec ?? 0),
+    );
+    const sqlTgtRel = buildStackDiffAggSql(
+      previewParams,
+      Number(previewParams.startSec),
+      Number(previewParams.endSec),
+    );
+    const sqlPreviewRelative = `-- 基线侧（${baseTrace === 'baseline' ? '基线 trace' : '主 trace'}）\n${sqlBaseRel}\n\n-- 目标侧（主 trace）\n${sqlTgtRel}`;
     return {
+      pluginId: plugin.id,
       sqlPreview,
+      sqlPreviewRelative,
       rows,
       stats: buildStats(plugin, rows),
     };
   }
 
   const sqlPreview = buildSqlPreview(plugin, params);
+  const sqlPreviewRelative = buildSqlPreview(plugin, previewParams);
   const rows = await postQueryRows(sqlPreview, 'primary');
 
   return {
+    pluginId: plugin.id,
     sqlPreview,
+    sqlPreviewRelative,
     rows,
     stats: buildStats(plugin, rows),
   };

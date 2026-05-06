@@ -44,15 +44,18 @@ export function useRunPluginQuery({
     setRunning(true);
     try {
       const compareOffset = isDualStackDiff ? baselineTraceStartSec : traceStartSec;
-      const absParams: QueryParams = {
+      const previewParams: QueryParams = {
         ...activeParams,
         process: globalProcess || activeParams.process,
+      };
+      const absParams: QueryParams = {
+        ...previewParams,
         startSec: activeParams.startSec + traceStartSec,
         endSec: activeParams.endSec + traceStartSec,
         compareStartSec: (activeParams.compareStartSec ?? 0) + compareOffset,
         compareEndSec: (activeParams.compareEndSec ?? 0) + compareOffset,
       };
-      const r = await runPluginQuery(activePlugin, absParams);
+      const r = await runPluginQuery(activePlugin, absParams, previewParams);
       setResultByPlugin((prev) => ({ ...prev, [activePluginId]: r }));
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err);

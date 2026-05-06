@@ -65,7 +65,12 @@ export type PluginDefinition = {
 };
 
 export type QueryResult = {
+  /** 产生该结果的内置插件 id，用于 SQL 预览等与当前选中插件对齐 */
+  pluginId: PluginId;
+  /** 实际发往 /query 的 SQL（含绝对 trace 时间，与 Perfetto ts 域一致） */
   sqlPreview: string;
+  /** 与参数面板一致的预览 SQL（相对主 trace 起点的窗口等），便于对照表单 */
+  sqlPreviewRelative: string;
   rows: Record<string, unknown>[];
   stats?: { label: string; value: string | number }[];
 };
