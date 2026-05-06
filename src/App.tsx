@@ -2,13 +2,14 @@ import { Layout } from 'antd';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import './App.css';
 import { PluginWorkbench } from './components/workbench';
+import { getRouterBasename } from './lib/api';
 import { SchemaDocsPage } from './pages/SchemaDocsPage';
 
 const { Footer } = Layout;
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={getRouterBasename()}>
       <Routes>
         <Route
           path="/"

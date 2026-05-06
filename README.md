@@ -80,6 +80,27 @@ npm run dev
 npm run build
 ```
 
+### 部署到子路径（例如 `/perfetto/`）
+
+构建时设置与部署目录一致的 `VITE_APP_BASE`（须带尾部 `/`，与 [Vite base](https://vite.dev/config/shared-options.html#base) 一致）：
+
+```bash
+VITE_APP_BASE=/perfetto/ npm run build
+```
+
+前端路由的 `basename` 与 `import.meta.env.BASE_URL` 对齐；API 请求前缀也会带上该前缀。
+
+反向代理需把子路径下除静态文件外的请求回退到 `index.html`（SPA），例如 Nginx：
+
+```nginx
+location /perfetto/ {
+  alias /path/to/dist/;
+  try_files $uri $uri/ /perfetto/index.html;
+}
+```
+
+（按你实际静态根目录调整 `alias` 与 `try_files` 中的回退路径。）
+
 ## Usage
 
 1. 打开页面后点击“导入 Trace 文件”
