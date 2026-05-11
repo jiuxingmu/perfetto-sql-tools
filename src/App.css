@@ -1,3 +1,61 @@
+/* Full-width bar: two stacked rows, both centered at all breakpoints */
+.site-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 24px 16px;
+  background: #f2f2f2;
+  font-size: 11px;
+  color: #71717a;
+}
+
+.site-footer-tagline {
+  margin: 0;
+  max-width: min(92vw, 36rem);
+  text-align: center;
+  letter-spacing: 0.12em;
+}
+
+.site-footer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  letter-spacing: 0.06em;
+}
+
+.site-footer-icp {
+  letter-spacing: 0.06em;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(113, 113, 122, 0.55);
+  text-underline-offset: 2px;
+  transition: color 0.15s ease;
+}
+
+.site-footer-icp:hover {
+  color: #52525b;
+}
+
+.site-footer-dot {
+  margin: 0;
+  user-select: none;
+  color: rgba(113, 113, 122, 0.85);
+}
+
+@media (max-width: 720px) {
+  .site-footer {
+    padding: 14px 16px 16px;
+  }
+}
+
 .counter {
   font-size: 16px;
   padding: 5px 10px;
